@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tuition Khata</title>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  body { margin: 0; }
+</style>
+
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          serif: ['Arvo', 'serif'],
+          sans: ['IBM Plex Sans', 'sans-serif'],
+          mono: ['IBM Plex Mono', 'monospace'],
+        }
+      }
+    }
+  }
+</script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// ====================================================================
+// FILL THESE IN — from your Supabase project (Settings -> API)
+// ====================================================================
+const SUPABASE_URL = 'https://xgsbjyqdkeaeihzhadgs.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_vP7cJ9AA9Ubf5dVu_WxEkg_fuymQNU5';
+// ====================================================================
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+const COLORS = {
+  paper: '#E7E6D9', paperLight: '#F4F3EA', ink: '#1E2A3A',
+  inkSoft: '#5C6357', redInk: '#A6321F', greenInk: '#2F6B3A', border: '#C9C7B4',
+};
+
+function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function monthLabel(k) { const [y,m] = k.split('-').map(Number); return `${MONTHS[m-1]} ${y}`; }
+function formatDate(iso) { return new Date(iso).toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 700;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.55));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function Stamp({ paid }) {
+  return (
+    <div style={{
+      color: paid ? COLORS.greenInk : COLORS.redInk,
+      border: `2.5px double ${paid ? COLORS.greenInk : COLORS.redInk}`,
+      transform: paid ? 'rotate(-6deg)' : 'rotate(4deg)',
+      fontFamily: "'Arvo', serif",
+    }} className="px-2 py-0.5 text-[11px] font-bold tracking-widest uppercase rounded-sm select-none">
+      {paid ? 'Paid' : 'Pending'}
+    </div>
+  );
+}
+
+function App() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [tutorId, setTutorId] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [payments, setPayments] = useState({});
+  const [currentMonth, setCurrentMonth] = useState(monthKey(new Date()));
+  const [showAdd, setShowAdd] = useState(false);
+  const [markPaidFor, setMarkPaidFor] = useState(null);
+  const [lightbox, setLightbox] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const savedId = localStorage.getItem('tutor_id');
+    if (savedId) { const idNum = Number(savedId); setTutorId(idNum); loadData(idNum); }
+    else { setLoading(false); }
+  }, []);
+
+  async function loadData(id) {
+    setLoading(true);
+    const { data: tutor } = await supabase.from('tutors').select('*').eq('id', id).single();
+    if (tutor) setProfile(tutor);
+    const { data: mem } = await supabase.from('members').select('*').eq('tutor_id', id);
+    setMembers(mem || []);
+    if (mem && mem.length) {
+      const ids = mem.map(m => m.id);
+      const { data: pay } = await supabase.from('payments').select('*').in('member_id', ids);
+      const map = {};
+      (pay || []).forEach(p => { map[`${p.member_id}_${p.month}`] = p; });
+      setPayments(map);
+    }
+    setLoading(false);
+  }
+
+  async function createTutor(name, upi) {
+    setSaving(true);
+    const { data, error: err } = await supabase.from('tutors').insert({ name, upi_id: upi }).select().single();
+    if (err) { setError('Could not create your register. Please try again.'); setSaving(false); return; }
+    localStorage.setItem('tutor_id', data.id);
+    setTutorId(data.id);
+    setProfile(data);
+    setSaving(false);
+  }
+
+  async function addMember(name, phone, fee) {
+    const { data, error: err } = await supabase.from('members')
+      .insert({ tutor_id: tutorId, name, phone, fee: Number(fee) }).select().single();
+    if (err) { setError('Could not add student. Please try again.'); return; }
+    setMembers([...members, data]);
+    setShowAdd(false);
+  }
+
+  function buildUpiLink(member) {
+    const params = new URLSearchParams({
+      pa: profile.upi_id, pn: profile.name, am: String(member.fee),
+      cu: 'INR', tn: `Tuition fee ${monthLabel(currentMonth)}`
+    });
+    return `upi://pay?${params.toString()}`;
+  }
+
+  function sendReminder(member) {
+    const upiLink = buildUpiLink(member);
+    const msg = `Hi! This is a reminder for ${member.name}'s tuition fee for ${monthLabel(currentMonth)}: Rs.${member.fee}.\n\nPay here: ${upiLink}\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent via Tuition Khata`;
+    const digits = member.phone.replace(/\D/g, '');
+    const waPhone = digits.length === 10 ? '91' + digits : digits;
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  }
+
+  async function handleMarkPaid(memberId, file) {
+    setSaving(true);
+    let screenshot = null;
+    try { if (file) screenshot = await compressImage(file); } catch (e) {}
+    const { data, error: err } = await supabase.from('payments')
+      .upsert({ member_id: memberId, month: currentMonth, paid: true, screenshot, paid_at: new Date().toISOString() },
+        { onConflict: 'member_id,month' }).select().single();
+    if (!err) setPayments({ ...payments, [`${memberId}_${currentMonth}`]: data });
+    setSaving(false);
+    setMarkPaidFor(null);
+  }
+
+  async function unmarkPaid(memberId) {
+    await supabase.from('payments').delete().eq('member_id', memberId).eq('month', currentMonth);
+    const next = { ...payments };
+    delete next[`${memberId}_${currentMonth}`];
+    setPayments(next);
+  }
+
+  function shiftMonth(delta) {
+    const [y, m] = currentMonth.split('-').map(Number);
+    setCurrentMonth(monthKey(new Date(y, m - 1 + delta, 1)));
+  }
+
+  if (loading) {
+    return (
+      <div style={{ backgroundColor: COLORS.paper }} className="min-h-screen flex items-center justify-center font-sans">
+        <span style={{ color: COLORS.inkSoft }}>Loading…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ backgroundColor: COLORS.paper, color: COLORS.ink }} className="min-h-screen font-sans">
+      <div className="max-w-md mx-auto px-4 pb-24 pt-6">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-2xl">📖</span>
+          <h1 style={{ fontFamily: "'Arvo', serif" }} className="text-2xl font-bold tracking-tight">Tuition Khata</h1>
+        </div>
+        <p style={{ color: COLORS.inkSoft }} className="text-sm mb-6 ml-8">your fee register</p>
+
+        {!profile ? (
+          <Onboarding onSave={createTutor} saving={saving} colors={COLORS} />
+        ) : (
+          <>
+            <div style={{ backgroundColor: COLORS.paperLight, borderColor: COLORS.border }}
+              className="flex items-center justify-between rounded-lg border px-3 py-2 mb-5">
+              <button onClick={() => shiftMonth(-1)} className="px-2 py-1">←</button>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace" }} className="text-sm font-medium">{monthLabel(currentMonth)}</span>
+              <button onClick={() => shiftMonth(1)} className="px-2 py-1">→</button>
+            </div>
+
+            {error && <div style={{ color: COLORS.redInk }} className="text-sm mb-4">{error}</div>}
+
+            {members.length === 0 ? (
+              <div style={{ borderColor: COLORS.border, color: COLORS.inkSoft }}
+                className="border border-dashed rounded-lg py-10 px-4 text-center mb-5">
+                <p className="text-sm">No entries yet.<br />Add your first student to begin your register.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 mb-5">
+                {members.map((m) => {
+                  const payment = payments[`${m.id}_${currentMonth}`];
+                  const paid = !!(payment && payment.paid);
+                  return (
+                    <div key={m.id} style={{ backgroundColor: COLORS.paperLight, borderColor: COLORS.border }} className="rounded-lg border p-4">
+                      <div className="flex items-start justify-between mb-1">
+                        <div>
+                          <p className="font-semibold text-[15px]">{m.name}</p>
+                          <p style={{ fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }} className="text-xs mt-0.5">+91 {m.phone}</p>
+                        </div>
+                        <Stamp paid={paid} />
+                      </div>
+                      <p style={{ fontFamily: "'IBM Plex Mono', monospace" }} className="text-lg font-medium mt-2 mb-3">
+                        ₹{Number(m.fee).toLocaleString('en-IN')}
+                        <span style={{ color: COLORS.inkSoft }} className="text-xs font-normal font-sans"> / month</span>
+                      </p>
+                      {paid ? (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {payment.screenshot && (
+                              <button onClick={() => setLightbox(payment.screenshot)}>
+                                <img src={payment.screenshot} className="w-10 h-10 object-cover rounded border" style={{ borderColor: COLORS.border }} />
+                              </button>
+                            )}
+                            <span style={{ color: COLORS.inkSoft }} className="text-xs">Paid {formatDate(payment.paid_at)}</span>
+                          </div>
+                          <button onClick={() => unmarkPaid(m.id)} style={{ color: COLORS.inkSoft }} className="text-xs hover:underline">Undo</button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button onClick={() => sendReminder(m)} style={{ backgroundColor: COLORS.ink, color: COLORS.paperLight }}
+                            className="flex-1 rounded-md py-2 text-xs font-medium">Remind on WhatsApp</button>
+                          <button onClick={() => setMarkPaidFor(m.id)} style={{ borderColor: COLORS.ink, color: COLORS.ink }}
+                            className="flex-1 rounded-md py-2 text-xs font-medium border">Mark Paid</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <button onClick={() => setShowAdd(true)} style={{ borderColor: COLORS.ink, color: COLORS.ink }}
+              className="w-full border border-dashed rounded-lg py-3 text-sm font-medium">+ Add Student</button>
+          </>
+        )}
+      </div>
+
+      {showAdd && <AddMemberModal onClose={() => setShowAdd(false)} onAdd={addMember} colors={COLORS} />}
+      {markPaidFor && (
+        <MarkPaidModal onClose={() => setMarkPaidFor(null)} saving={saving}
+          onConfirm={(file) => handleMarkPaid(markPaidFor, file)} colors={COLORS} />
+      )}
+      {lightbox && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50" onClick={() => setLightbox(null)}>
+          <img src={lightbox} className="max-w-full max-h-full rounded-lg" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Onboarding({ onSave, saving, colors }) {
+  const [name, setName] = useState('');
+  const [upi, setUpi] = useState('');
+  const canSave = name.trim().length > 1 && upi.trim().length > 3;
+  return (
+    <div style={{ backgroundColor: colors.paperLight, borderColor: colors.border }} className="rounded-lg border p-5">
+      <p style={{ fontFamily: "'Arvo', serif" }} className="font-bold mb-1">Set up your register</p>
+      <p style={{ color: colors.inkSoft }} className="text-sm mb-4">Used to generate your payment links and reminder messages.</p>
+      <label className="block text-xs font-medium mb-1">Your name</label>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priya Sharma"
+        style={{ borderColor: colors.border }} className="w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60" />
+      <label className="block text-xs font-medium mb-1">Your UPI ID</label>
+      <input value={upi} onChange={e => setUpi(e.target.value)} placeholder="e.g. priya@okhdfcbank"
+        style={{ borderColor: colors.border }} className="w-full border rounded-md px-3 py-2 text-sm mb-4 bg-white/60" />
+      <button disabled={!canSave || saving} onClick={() => onSave(name.trim(), upi.trim())}
+        style={{ backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canSave || saving) ? 0.5 : 1 }}
+        className="w-full rounded-md py-2.5 text-sm font-medium">{saving ? 'Saving…' : 'Start my register'}</button>
+    </div>
+  );
+}
+
+function AddMemberModal({ onClose, onAdd, colors }) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [fee, setFee] = useState('');
+  const phoneValid = /^\d{10}$/.test(phone);
+  const canAdd = name.trim().length > 1 && phoneValid && Number(fee) > 0;
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
+      <div style={{ backgroundColor: colors.paperLight }} className="w-full max-w-md rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p style={{ fontFamily: "'Arvo', serif" }} className="font-bold">New entry</p>
+          <button onClick={onClose}>✕</button>
+        </div>
+        <label className="block text-xs font-medium mb-1">Student name</label>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Aarav Mehta"
+          style={{ borderColor: colors.border }} className="w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60" />
+        <label className="block text-xs font-medium mb-1">Parent's WhatsApp number</label>
+        <div className="flex items-center gap-2 mb-1">
+          <span style={{ color: colors.inkSoft }} className="text-sm">+91</span>
+          <input value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10))} placeholder="10-digit number"
+            style={{ borderColor: colors.border }} className="flex-1 border rounded-md px-3 py-2 text-sm bg-white/60" />
+        </div>
+        {phone.length > 0 && !phoneValid && <p style={{ color: colors.redInk }} className="text-xs mb-2">Enter a valid 10-digit number.</p>}
+        <label className="block text-xs font-medium mb-1 mt-2">Monthly fee (₹)</label>
+        <input value={fee} onChange={e => setFee(e.target.value.replace(/[^\d]/g,''))} placeholder="e.g. 1500"
+          style={{ borderColor: colors.border }} className="w-full border rounded-md px-3 py-2 text-sm mb-4 bg-white/60" />
+        <button disabled={!canAdd} onClick={() => onAdd(name.trim(), phone, fee)}
+          style={{ backgroundColor: colors.ink, color: colors.paperLight, opacity: canAdd ? 1 : 0.5 }}
+          className="w-full rounded-md py-2.5 text-sm font-medium">Add to register</button>
+      </div>
+    </div>
+  );
+}
+
+function MarkPaidModal({ onClose, onConfirm, saving, colors }) {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const inputRef = useRef(null);
+  function handleFile(f) { setFile(f); if (f) setPreview(URL.createObjectURL(f)); }
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
+      <div style={{ backgroundColor: colors.paperLight }} className="w-full max-w-md rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p style={{ fontFamily: "'Arvo', serif" }} className="font-bold">Mark as paid</p>
+          <button onClick={onClose}>✕</button>
+        </div>
+        <p style={{ color: colors.inkSoft }} className="text-sm mb-3">Attach the payment screenshot the parent sent you, for your records.</p>
+        <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => handleFile(e.target.files[0])} />
+        {preview ? (
+          <button onClick={() => inputRef.current.click()} className="w-full mb-4">
+            <img src={preview} className="w-full max-h-48 object-contain rounded-md border" style={{ borderColor: colors.border }} />
+          </button>
+        ) : (
+          <button onClick={() => inputRef.current.click()} style={{ borderColor: colors.border, color: colors.inkSoft }}
+            className="w-full border border-dashed rounded-md py-8 text-xs mb-4">Tap to attach screenshot (optional)</button>
+        )}
+        <button disabled={saving} onClick={() => onConfirm(file)}
+          style={{ backgroundColor: colors.greenInk, color: colors.paperLight, opacity: saving ? 0.6 : 1 }}
+          className="w-full rounded-md py-2.5 text-sm font-medium">{saving ? 'Saving…' : 'Confirm paid'}</button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
