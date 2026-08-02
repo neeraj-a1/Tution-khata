@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Tuition Khata</title>
 
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>eruda.init();</script>
-
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -57,6 +54,32 @@ function monthKey(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).pad
 function monthLabel(k) { const parts = k.split('-').map(Number); return MONTHS[parts[1]-1] + ' ' + parts[0]; }
 function formatDate(iso) { return new Date(iso).toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
 
+function monthsBetweenInclusive(startKey, endKey) {
+  const s = startKey.split('-').map(Number);
+  const e = endKey.split('-').map(Number);
+  const out = [];
+  let y = s[0], m = s[1];
+  while (y < e[0] || (y === e[0] && m <= e[1])) {
+    out.push(y + '-' + String(m).padStart(2, '0'));
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+function studentMonths(member) {
+  const startKey = monthKey(new Date(member.created_at));
+  const endKey = monthKey(new Date());
+  return monthsBetweenInclusive(startKey, endKey);
+}
+
+function outstandingMonths(member, payments) {
+  return studentMonths(member).filter(function(mk) {
+    const p = payments[member.id + '_' + mk];
+    return !(p && p.paid);
+  });
+}
+
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -81,15 +104,17 @@ function compressImage(file) {
 
 function Stamp(props) {
   const paid = props.paid;
+  const label = props.label || (paid ? 'Paid' : 'Pending');
   return h('div', {
     style: {
       color: paid ? COLORS.greenInk : COLORS.redInk,
       border: '2.5px double ' + (paid ? COLORS.greenInk : COLORS.redInk),
       transform: paid ? 'rotate(-6deg)' : 'rotate(4deg)',
       fontFamily: "'Arvo', serif",
+      whiteSpace: 'nowrap',
     },
     className: 'px-2 py-0.5 text-[11px] font-bold tracking-widest uppercase rounded-sm select-none'
-  }, paid ? 'Paid' : 'Pending');
+  }, label);
 }
 
 function App() {
@@ -99,9 +124,9 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [members, setMembers] = useState([]);
   const [payments, setPayments] = useState({});
-  const [currentMonth, setCurrentMonth] = useState(monthKey(new Date()));
   const [showAdd, setShowAdd] = useState(false);
   const [markPaidFor, setMarkPaidFor] = useState(null);
+  const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [error, setError] = useState('');
 
@@ -146,49 +171,53 @@ function App() {
     setShowAdd(false);
   }
 
-  function buildUpiLink(member) {
+  function buildUpiLink(member, amount) {
     const params = new URLSearchParams({
-      pa: profile.upi_id, pn: profile.name, am: String(member.fee),
-      cu: 'INR', tn: 'Tuition fee ' + monthLabel(currentMonth)
+      pa: profile.upi_id, pn: profile.name, am: String(amount), cu: 'INR', tn: 'Tuition fee'
     });
     return 'upi://pay?' + params.toString();
   }
 
   function sendReminder(member) {
-    const upiLink = buildUpiLink(member);
-    const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee for " + monthLabel(currentMonth) + ": Rs." + member.fee +
-      ".\n\nPay here: " + upiLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n\u2014 sent via Tuition Khata";
+    const outstanding = outstandingMonths(member, payments);
+    if (outstanding.length === 0) return;
+    const total = outstanding.length * Number(member.fee);
+    const monthsList = outstanding.map(monthLabel).join(', ');
+    const upiLink = buildUpiLink(member, total);
+    const breakdown = outstanding.length > 1
+      ? ' (' + outstanding.length + ' months \u00d7 Rs.' + member.fee + ')'
+      : '';
+    const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nPending: " + monthsList +
+      "\nTotal due: Rs." + total + breakdown +
+      "\n\nPay here: " + upiLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n\u2014 sent via Tuition Khata";
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
   }
 
-  async function handleMarkPaid(memberId, file) {
+  async function handleMarkPaid(memberId, monthsToMark, file) {
     setSaving(true);
     let screenshot = null;
     try { if (file) screenshot = await compressImage(file); } catch (e) {}
-    const res = await sb.from('payments')
-      .upsert({ member_id: memberId, month: currentMonth, paid: true, screenshot: screenshot, paid_at: new Date().toISOString() },
-        { onConflict: 'member_id,month' }).select().single();
-    if (!res.error) {
-      const next = Object.assign({}, payments);
-      next[memberId + '_' + currentMonth] = res.data;
-      setPayments(next);
+    const now = new Date().toISOString();
+    const next = Object.assign({}, payments);
+    for (let i = 0; i < monthsToMark.length; i++) {
+      const mk = monthsToMark[i];
+      const res = await sb.from('payments')
+        .upsert({ member_id: memberId, month: mk, paid: true, screenshot: screenshot, paid_at: now },
+          { onConflict: 'member_id,month' }).select().single();
+      if (!res.error) next[memberId + '_' + mk] = res.data;
     }
+    setPayments(next);
     setSaving(false);
     setMarkPaidFor(null);
   }
 
-  async function unmarkPaid(memberId) {
-    await sb.from('payments').delete().eq('member_id', memberId).eq('month', currentMonth);
+  async function unmarkPaid(memberId, mk) {
+    await sb.from('payments').delete().eq('member_id', memberId).eq('month', mk);
     const next = Object.assign({}, payments);
-    delete next[memberId + '_' + currentMonth];
+    delete next[memberId + '_' + mk];
     setPayments(next);
-  }
-
-  function shiftMonth(delta) {
-    const parts = currentMonth.split('-').map(Number);
-    setCurrentMonth(monthKey(new Date(parts[0], parts[1] - 1 + delta, 1)));
   }
 
   if (loading) {
@@ -196,12 +225,6 @@ function App() {
       h('span', { style: { color: COLORS.inkSoft } }, 'Loading\u2026')
     );
   }
-
-  const monthNav = h('div', { style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'flex items-center justify-between rounded-lg border px-3 py-2 mb-5' },
-    h('button', { onClick: () => shiftMonth(-1), className: 'px-2 py-1' }, '\u2190'),
-    h('span', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm font-medium' }, monthLabel(currentMonth)),
-    h('button', { onClick: () => shiftMonth(1), className: 'px-2 py-1' }, '\u2192')
-  );
 
   const errorBox = error ? h('div', { style: { color: COLORS.redInk }, className: 'text-sm mb-4' }, error) : null;
 
@@ -211,34 +234,58 @@ function App() {
 
   const memberCards = h('div', { className: 'space-y-3 mb-5' },
     members.map((m) => {
-      const payment = payments[m.id + '_' + currentMonth];
-      const paid = !!(payment && payment.paid);
+      const outstanding = outstandingMonths(m, payments);
+      const allMonths = studentMonths(m).slice().reverse();
+      const totalDue = outstanding.length * Number(m.fee);
+      const isExpanded = expandedHistory === m.id;
+      const statusLabel = outstanding.length === 0 ? 'All paid' : (outstanding.length + ' month' + (outstanding.length > 1 ? 's' : '') + ' due');
+
+      const historyPanel = isExpanded ? h('div', { className: 'mt-3 pt-3 border-t space-y-1.5', style: { borderColor: COLORS.border } },
+        allMonths.map(function(mk) {
+          const p = payments[m.id + '_' + mk];
+          const isPaid = !!(p && p.paid);
+          return h('div', { key: mk, className: 'flex items-center justify-between text-xs' },
+            h('span', { style: { color: COLORS.inkSoft } }, monthLabel(mk)),
+            isPaid
+              ? h('div', { className: 'flex items-center gap-2' },
+                  p.screenshot ? h('button', { onClick: () => setLightbox(p.screenshot) },
+                    h('img', { src: p.screenshot, className: 'w-6 h-6 object-cover rounded border', style: { borderColor: COLORS.border } })
+                  ) : null,
+                  h('span', { style: { color: COLORS.greenInk } }, 'Paid ' + formatDate(p.paid_at)),
+                  h('button', { onClick: () => unmarkPaid(m.id, mk), style: { color: COLORS.inkSoft }, className: 'hover:underline' }, 'Undo')
+                )
+              : h('span', { style: { color: COLORS.redInk } }, 'Pending')
+          );
+        })
+      ) : null;
+
       return h('div', { key: m.id, style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border p-4' },
         h('div', { className: 'flex items-start justify-between mb-1' },
           h('div', null,
             h('p', { className: 'font-semibold text-[15px]' }, m.name),
             h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone)
           ),
-          h(Stamp, { paid: paid })
+          h(Stamp, { paid: outstanding.length === 0, label: statusLabel })
         ),
-        h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2 mb-3' },
+        h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2' },
           '\u20B9' + Number(m.fee).toLocaleString('en-IN'),
           h('span', { style: { color: COLORS.inkSoft }, className: 'text-xs font-normal font-sans' }, ' / month')
         ),
-        paid
-          ? h('div', { className: 'flex items-center justify-between' },
-              h('div', { className: 'flex items-center gap-2' },
-                payment.screenshot ? h('button', { onClick: () => setLightbox(payment.screenshot) },
-                  h('img', { src: payment.screenshot, className: 'w-10 h-10 object-cover rounded border', style: { borderColor: COLORS.border } })
-                ) : null,
-                h('span', { style: { color: COLORS.inkSoft }, className: 'text-xs' }, 'Paid ' + formatDate(payment.paid_at))
-              ),
-              h('button', { onClick: () => unmarkPaid(m.id), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Undo')
-            )
-          : h('div', { className: 'flex gap-2' },
+        outstanding.length > 0 ? h('p', { style: { color: COLORS.redInk }, className: 'text-xs font-medium mb-3' },
+          'Total due: \u20B9' + totalDue.toLocaleString('en-IN') + (outstanding.length > 1 ? ' (' + outstanding.length + ' months)' : '')
+        ) : h('div', { className: 'mb-3' }),
+        outstanding.length > 0
+          ? h('div', { className: 'flex gap-2' },
               h('button', { onClick: () => sendReminder(m), style: { backgroundColor: COLORS.ink, color: COLORS.paperLight }, className: 'flex-1 rounded-md py-2 text-xs font-medium' }, 'Remind on WhatsApp'),
               h('button', { onClick: () => setMarkPaidFor(m.id), style: { borderColor: COLORS.ink, color: COLORS.ink }, className: 'flex-1 rounded-md py-2 text-xs font-medium border' }, 'Mark Paid')
             )
+          : null,
+        h('button', {
+          onClick: () => setExpandedHistory(isExpanded ? null : m.id),
+          style: { color: COLORS.inkSoft },
+          className: 'text-xs mt-3 hover:underline'
+        }, isExpanded ? 'Hide history' : 'View history'),
+        historyPanel
       );
     })
   );
@@ -246,11 +293,13 @@ function App() {
   const mainContent = !profile
     ? h(Onboarding, { onSave: createTutor, saving: saving, colors: COLORS })
     : h(React.Fragment, null,
-        monthNav,
         errorBox,
         members.length === 0 ? emptyState : memberCards,
         h('button', { onClick: () => setShowAdd(true), style: { borderColor: COLORS.ink, color: COLORS.ink }, className: 'w-full border border-dashed rounded-lg py-3 text-sm font-medium' }, '+ Add Student')
       );
+
+  const markPaidMember = markPaidFor ? members.find(x => x.id === markPaidFor) : null;
+  const markPaidOutstanding = markPaidMember ? outstandingMonths(markPaidMember, payments) : [];
 
   return h('div', { style: { backgroundColor: COLORS.paper, color: COLORS.ink }, className: 'min-h-screen font-sans' },
     h('div', { className: 'max-w-md mx-auto px-4 pb-24 pt-6' },
@@ -262,7 +311,13 @@ function App() {
       mainContent
     ),
     showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
-    markPaidFor ? h(MarkPaidModal, { onClose: () => setMarkPaidFor(null), saving: saving, onConfirm: (file) => handleMarkPaid(markPaidFor, file), colors: COLORS }) : null,
+    markPaidFor ? h(MarkPaidModal, {
+      onClose: () => setMarkPaidFor(null),
+      saving: saving,
+      outstandingMonths: markPaidOutstanding,
+      onConfirm: (monthsToMark, file) => handleMarkPaid(markPaidFor, monthsToMark, file),
+      colors: COLORS
+    }) : null,
     lightbox ? h('div', { className: 'fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50', onClick: () => setLightbox(null) },
       h('img', { src: lightbox, className: 'max-w-full max-h-full rounded-lg' })
     ) : null
@@ -325,15 +380,33 @@ function AddMemberModal(props) {
 
 function MarkPaidModal(props) {
   const onClose = props.onClose, onConfirm = props.onConfirm, saving = props.saving, colors = props.colors;
+  const outstanding = props.outstandingMonths || [];
+  const [selected, setSelected] = useState(outstanding.slice());
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const inputRef = useRef(null);
+
+  function toggleMonth(mk) {
+    if (selected.indexOf(mk) >= 0) setSelected(selected.filter(x => x !== mk));
+    else setSelected(selected.concat([mk]));
+  }
   function handleFile(f) { setFile(f); if (f) setPreview(URL.createObjectURL(f)); }
+
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Mark as paid'),
         h('button', { onClick: onClose }, '\u2715')
+      ),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-2' }, 'Select which month(s) this payment covers:'),
+      h('div', { className: 'space-y-1.5 mb-4' },
+        outstanding.map(function(mk) {
+          const checked = selected.indexOf(mk) >= 0;
+          return h('label', { key: mk, className: 'flex items-center gap-2 text-sm cursor-pointer' },
+            h('input', { type: 'checkbox', checked: checked, onChange: () => toggleMonth(mk) }),
+            h('span', null, monthLabel(mk))
+          );
+        })
       ),
       h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-3' }, 'Attach the payment screenshot the parent sent you, for your records.'),
       h('input', { ref: inputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handleFile(e.target.files[0]) }),
@@ -347,11 +420,11 @@ function MarkPaidModal(props) {
             className: 'w-full border border-dashed rounded-md py-8 text-xs mb-4'
           }, 'Tap to attach screenshot (optional)'),
       h('button', {
-        disabled: saving,
-        onClick: () => onConfirm(file),
-        style: { backgroundColor: colors.greenInk, color: colors.paperLight, opacity: saving ? 0.6 : 1 },
+        disabled: saving || selected.length === 0,
+        onClick: () => onConfirm(selected, file),
+        style: { backgroundColor: colors.greenInk, color: colors.paperLight, opacity: (saving || selected.length === 0) ? 0.6 : 1 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
-      }, saving ? 'Saving\u2026' : 'Confirm paid')
+      }, saving ? 'Saving\u2026' : ('Confirm paid (' + selected.length + ' month' + (selected.length !== 1 ? 's' : '') + ')'))
     )
   );
 }
