@@ -44,7 +44,7 @@ const SUPABASE_URL = 'https://xgsbjyqdkeaeihzhadgs.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_vP7cJ9AA9Ubf5dVu_WxEkg_fuymQNU5';
 // ====================================================================
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -113,14 +113,14 @@ function App() {
 
   async function loadData(id) {
     setLoading(true);
-    const t = await supabase.from('tutors').select('*').eq('id', id).single();
+    const t = await sb.from('tutors').select('*').eq('id', id).single();
     if (t.data) setProfile(t.data);
-    const m = await supabase.from('members').select('*').eq('tutor_id', id);
+    const m = await sb.from('members').select('*').eq('tutor_id', id);
     const mem = m.data || [];
     setMembers(mem);
     if (mem.length) {
       const ids = mem.map(x => x.id);
-      const p = await supabase.from('payments').select('*').in('member_id', ids);
+      const p = await sb.from('payments').select('*').in('member_id', ids);
       const map = {};
       (p.data || []).forEach(pay => { map[pay.member_id + '_' + pay.month] = pay; });
       setPayments(map);
@@ -130,7 +130,7 @@ function App() {
 
   async function createTutor(name, upi) {
     setSaving(true);
-    const res = await supabase.from('tutors').insert({ name: name, upi_id: upi }).select().single();
+    const res = await sb.from('tutors').insert({ name: name, upi_id: upi }).select().single();
     if (res.error) { setError('Could not create your register. Please try again.'); setSaving(false); return; }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
@@ -139,7 +139,7 @@ function App() {
   }
 
   async function addMember(name, phone, fee) {
-    const res = await supabase.from('members')
+    const res = await sb.from('members')
       .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee) }).select().single();
     if (res.error) { setError('Could not add student. Please try again.'); return; }
     setMembers(members.concat([res.data]));
@@ -167,7 +167,7 @@ function App() {
     setSaving(true);
     let screenshot = null;
     try { if (file) screenshot = await compressImage(file); } catch (e) {}
-    const res = await supabase.from('payments')
+    const res = await sb.from('payments')
       .upsert({ member_id: memberId, month: currentMonth, paid: true, screenshot: screenshot, paid_at: new Date().toISOString() },
         { onConflict: 'member_id,month' }).select().single();
     if (!res.error) {
@@ -180,7 +180,7 @@ function App() {
   }
 
   async function unmarkPaid(memberId) {
-    await supabase.from('payments').delete().eq('member_id', memberId).eq('month', currentMonth);
+    await sb.from('payments').delete().eq('member_id', memberId).eq('month', currentMonth);
     const next = Object.assign({}, payments);
     delete next[memberId + '_' + currentMonth];
     setPayments(next);
