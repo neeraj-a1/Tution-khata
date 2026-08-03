@@ -166,9 +166,10 @@ function App() {
   async function addMember(name, phone, fee, joinedMonth) {
     const res = await sb.from('members')
       .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth }).select().single();
-    if (res.error) { setError('Could not add student. Please try again.'); return; }
+    if (res.error) { return res.error.message || 'Could not add student.'; }
     setMembers(members.concat([res.data]));
     setShowAdd(false);
+    return null;
   }
 
   function buildUpiLink(member, amount) {
@@ -351,8 +352,19 @@ function AddMemberModal(props) {
   const [phone, setPhone] = useState('');
   const [fee, setFee] = useState('');
   const [joinedMonth, setJoinedMonth] = useState(monthKey(new Date()));
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState('');
   const phoneValid = /^\d{10}$/.test(phone);
   const canAdd = name.trim().length > 1 && phoneValid && Number(fee) > 0;
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setLocalError('');
+    const errMsg = await onAdd(name.trim(), phone, fee, joinedMonth);
+    setSubmitting(false);
+    if (errMsg) setLocalError(errMsg);
+  }
+
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
@@ -372,12 +384,13 @@ function AddMemberModal(props) {
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Student since'),
       h('input', { type: 'month', value: joinedMonth, onChange: e => setJoinedMonth(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Set this to when they actually started \u2014 past months will show as due until you mark them paid.'),
+      localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
       h('button', {
-        disabled: !canAdd,
-        onClick: () => onAdd(name.trim(), phone, fee, joinedMonth),
-        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: canAdd ? 1 : 0.5 },
+        disabled: !canAdd || submitting,
+        onClick: handleSubmit,
+        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canAdd && !submitting) ? 1 : 0.5 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
-      }, 'Add to register')
+      }, submitting ? 'Adding\u2026' : 'Add to register')
     )
   );
 }
