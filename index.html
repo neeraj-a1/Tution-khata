@@ -125,6 +125,7 @@ function App() {
   const [members, setMembers] = useState([]);
   const [payments, setPayments] = useState({});
   const [showAdd, setShowAdd] = useState(false);
+  const [editingMember, setEditingMember] = useState(null);
   const [markPaidFor, setMarkPaidFor] = useState(null);
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
@@ -169,6 +170,15 @@ function App() {
     if (res.error) { return res.error.message || 'Could not add student.'; }
     setMembers(members.concat([res.data]));
     setShowAdd(false);
+    return null;
+  }
+
+  async function editMember(memberId, name, phone, fee) {
+    const res = await sb.from('members')
+      .update({ name: name, phone: phone, fee: Number(fee) }).eq('id', memberId).select().single();
+    if (res.error) { return res.error.message || 'Could not update student.'; }
+    setMembers(members.map(m => m.id === memberId ? res.data : m));
+    setEditingMember(null);
     return null;
   }
 
@@ -263,7 +273,10 @@ function App() {
       return h('div', { key: m.id, style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border p-4' },
         h('div', { className: 'flex items-start justify-between mb-1' },
           h('div', null,
-            h('p', { className: 'font-semibold text-[15px]' }, m.name),
+            h('div', { className: 'flex items-center gap-2' },
+              h('p', { className: 'font-semibold text-[15px]' }, m.name),
+              h('button', { onClick: () => setEditingMember(m), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit')
+            ),
             h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone)
           ),
           h(Stamp, { paid: outstanding.length === 0, label: statusLabel })
@@ -312,6 +325,7 @@ function App() {
       mainContent
     ),
     showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
+    editingMember ? h(EditMemberModal, { member: editingMember, onClose: () => setEditingMember(null), onSave: editMember, colors: COLORS }) : null,
     markPaidFor ? h(MarkPaidModal, {
       onClose: () => setMarkPaidFor(null),
       saving: saving,
@@ -391,6 +405,52 @@ function AddMemberModal(props) {
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canAdd && !submitting) ? 1 : 0.5 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
       }, submitting ? 'Adding\u2026' : 'Add to register')
+    )
+  );
+}
+
+function EditMemberModal(props) {
+  const member = props.member, onClose = props.onClose, onSave = props.onSave, colors = props.colors;
+  const [name, setName] = useState(member.name);
+  const [phone, setPhone] = useState(member.phone);
+  const [fee, setFee] = useState(String(member.fee));
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const phoneValid = /^\d{10}$/.test(phone);
+  const canSave = name.trim().length > 1 && phoneValid && Number(fee) > 0;
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setLocalError('');
+    const errMsg = await onSave(member.id, name.trim(), phone, fee);
+    setSubmitting(false);
+    if (errMsg) setLocalError(errMsg);
+  }
+
+  return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+      h('div', { className: 'flex items-center justify-between mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit student'),
+        h('button', { onClick: onClose }, '\u2715')
+      ),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Student name'),
+      h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's WhatsApp number"),
+      h('div', { className: 'flex items-center gap-2 mb-1' },
+        h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
+        h('input', { value: phone, onChange: e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10)), style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
+      ),
+      (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : null,
+      h('label', { className: 'block text-xs font-medium mb-1 mt-2' }, 'Monthly fee (\u20B9)'),
+      h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'This updates their fee going forward \u2014 months already marked paid are not affected.'),
+      localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
+      h('button', {
+        disabled: !canSave || submitting,
+        onClick: handleSubmit,
+        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canSave && !submitting) ? 1 : 0.5 },
+        className: 'w-full rounded-md py-2.5 text-sm font-medium'
+      }, submitting ? 'Saving\u2026' : 'Save changes')
     )
   );
 }
