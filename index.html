@@ -126,6 +126,7 @@ function App() {
   const [payments, setPayments] = useState({});
   const [showAdd, setShowAdd] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
+  const [viewMode, setViewMode] = useState('cards');
   const [markPaidFor, setMarkPaidFor] = useState(null);
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
@@ -304,11 +305,57 @@ function App() {
     })
   );
 
+  const tableView = h('div', { style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border mb-5 overflow-hidden' },
+    h('table', { className: 'w-full text-sm' },
+      h('thead', null,
+        h('tr', { style: { borderColor: COLORS.border }, className: 'border-b' },
+          h('th', { className: 'text-left px-3 py-2 font-medium' }, 'Student'),
+          h('th', { className: 'text-right px-3 py-2 font-medium' }, 'Fee'),
+          h('th', { className: 'text-right px-3 py-2 font-medium' }, 'Due')
+        )
+      ),
+      h('tbody', null,
+        members.map(function(m, i) {
+          const outstanding = outstandingMonths(m, payments);
+          const totalDue = outstanding.length * Number(m.fee);
+          return h('tr', { key: m.id, style: { borderColor: COLORS.border }, className: i < members.length - 1 ? 'border-b' : '' },
+            h('td', { className: 'px-3 py-2' },
+              h('div', { className: 'font-medium' }, m.name),
+              h('div', { style: { color: COLORS.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-xs' }, '+91 ' + m.phone)
+            ),
+            h('td', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-right px-3 py-2' }, '\u20B9' + Number(m.fee).toLocaleString('en-IN')),
+            h('td', { className: 'text-right px-3 py-2' },
+              outstanding.length === 0
+                ? h('span', { style: { color: COLORS.greenInk }, className: 'text-xs font-medium' }, 'All paid')
+                : h('span', { style: { color: COLORS.redInk, fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-xs font-medium' }, '\u20B9' + totalDue.toLocaleString('en-IN'))
+            )
+          );
+        })
+      )
+    )
+  );
+
+  const viewToggle = h('div', { className: 'flex gap-2 mb-4' },
+    h('button', {
+      onClick: () => setViewMode('cards'),
+      style: viewMode === 'cards' ? { backgroundColor: COLORS.ink, color: COLORS.paperLight } : { color: COLORS.inkSoft, borderColor: COLORS.border },
+      className: 'px-3 py-1.5 rounded-md text-xs font-medium' + (viewMode !== 'cards' ? ' border' : '')
+    }, 'Cards'),
+    h('button', {
+      onClick: () => setViewMode('table'),
+      style: viewMode === 'table' ? { backgroundColor: COLORS.ink, color: COLORS.paperLight } : { color: COLORS.inkSoft, borderColor: COLORS.border },
+      className: 'px-3 py-1.5 rounded-md text-xs font-medium' + (viewMode !== 'table' ? ' border' : '')
+    }, 'Table \u2014 all at a glance')
+  );
+
   const mainContent = !profile
     ? h(Onboarding, { onSave: createTutor, saving: saving, colors: COLORS })
     : h(React.Fragment, null,
         errorBox,
-        members.length === 0 ? emptyState : memberCards,
+        members.length === 0 ? emptyState : h(React.Fragment, null,
+          viewToggle,
+          viewMode === 'table' ? tableView : memberCards
+        ),
         h('button', { onClick: () => setShowAdd(true), style: { borderColor: COLORS.ink, color: COLORS.ink }, className: 'w-full border border-dashed rounded-lg py-3 text-sm font-medium' }, '+ Add Student')
       );
 
