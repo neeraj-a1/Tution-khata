@@ -138,6 +138,22 @@ function App() {
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [error, setError] = useState('');
+  const [installPrompt, setInstallPrompt] = useState(null);
+
+  useEffect(() => {
+    function handler(e) {
+      e.preventDefault();
+      setInstallPrompt(e);
+    }
+    window.addEventListener('beforeinstallprompt', handler);
+    return function() { window.removeEventListener('beforeinstallprompt', handler); };
+  }, []);
+
+  function handleInstallClick() {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    installPrompt.userChoice.then(function() { setInstallPrompt(null); });
+  }
 
   useEffect(() => {
     const savedId = localStorage.getItem('tutor_id');
@@ -376,6 +392,11 @@ function App() {
         h('h1', { style: { fontFamily: "'Arvo', serif" }, className: 'text-2xl font-bold tracking-tight' }, 'Tuition Khata')
       ),
       h('p', { style: { color: COLORS.inkSoft }, className: 'text-sm mb-6 ml-8' }, 'your fee register'),
+      installPrompt ? h('button', {
+        onClick: handleInstallClick,
+        style: { backgroundColor: COLORS.ink, color: COLORS.paperLight },
+        className: 'w-full rounded-lg py-2.5 text-sm font-medium mb-5'
+      }, '\uD83D\uDCF2 Install App on this device') : null,
       mainContent
     ),
     showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
