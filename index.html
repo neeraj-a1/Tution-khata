@@ -109,6 +109,29 @@ function compressImage(file) {
   });
 }
 
+function compressPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const size = 200;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale, hgt = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - hgt) / 2, w, hgt);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function Stamp(props) {
   const paid = props.paid;
   const label = props.label || (paid ? 'Paid' : 'Pending');
@@ -137,6 +160,7 @@ function App() {
   const [markPaidFor, setMarkPaidFor] = useState(null);
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
+  const [remindQueue, setRemindQueue] = useState(null);
   const [error, setError] = useState('');
   const [installPrompt, setInstallPrompt] = useState(null);
 
@@ -188,18 +212,20 @@ function App() {
     setSaving(false);
   }
 
-  async function addMember(name, phone, fee, joinedMonth) {
+  async function addMember(name, phone, fee, joinedMonth, photo) {
     const res = await sb.from('members')
-      .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth }).select().single();
+      .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth, photo: photo }).select().single();
     if (res.error) { return res.error.message || 'Could not add student.'; }
     setMembers(members.concat([res.data]));
     setShowAdd(false);
     return null;
   }
 
-  async function editMember(memberId, name, phone, fee) {
+  async function editMember(memberId, name, phone, fee, photo) {
+    const updates = { name: name, phone: phone, fee: Number(fee) };
+    if (photo !== undefined) updates.photo = photo;
     const res = await sb.from('members')
-      .update({ name: name, phone: phone, fee: Number(fee) }).eq('id', memberId).select().single();
+      .update(updates).eq('id', memberId).select().single();
     if (res.error) { return res.error.message || 'Could not update student.'; }
     setMembers(members.map(m => m.id === memberId ? res.data : m));
     setEditingMember(null);
@@ -248,6 +274,15 @@ function App() {
     setMarkPaidFor(null);
   }
 
+  function sendReceipt(member, mk, payment) {
+    const msg = "\u2705 Payment Received\n\nStudent: " + member.name + "\nMonth: " + monthLabel(mk) +
+      "\nAmount: Rs." + member.fee + "\nReceived on: " + formatDate(payment.paid_at) +
+      "\n\nThank you!\n\u2014 " + profile.name + " (via Tuition Khata)";
+    const digits = member.phone.replace(/\D/g, '');
+    const waPhone = digits.length === 10 ? '91' + digits : digits;
+    window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
+  }
+
   async function unmarkPaid(memberId, mk) {
     await sb.from('payments').delete().eq('member_id', memberId).eq('month', mk);
     const next = Object.assign({}, payments);
@@ -287,6 +322,7 @@ function App() {
                     h('img', { src: p.screenshot, className: 'w-6 h-6 object-cover rounded border', style: { borderColor: COLORS.border } })
                   ) : null,
                   h('span', { style: { color: COLORS.greenInk } }, 'Paid ' + formatDate(p.paid_at)),
+                  h('button', { onClick: () => sendReceipt(m, mk, p), style: { color: COLORS.inkSoft }, className: 'hover:underline' }, 'Send receipt'),
                   h('button', { onClick: () => unmarkPaid(m.id, mk), style: { color: COLORS.inkSoft }, className: 'hover:underline' }, 'Undo')
                 )
               : h('span', { style: { color: COLORS.redInk } }, 'Pending')
@@ -296,12 +332,15 @@ function App() {
 
       return h('div', { key: m.id, style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border p-4' },
         h('div', { className: 'flex items-start justify-between mb-1' },
-          h('div', null,
-            h('div', { className: 'flex items-center gap-2' },
-              h('p', { className: 'font-semibold text-[15px]' }, m.name),
-              h('button', { onClick: () => setEditingMember(m), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit')
-            ),
-            h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone)
+          h('div', { className: 'flex items-center gap-3' },
+            m.photo ? h('img', { src: m.photo, className: 'w-10 h-10 rounded-full object-cover', style: { border: '1px solid ' + COLORS.border } }) : null,
+            h('div', null,
+              h('div', { className: 'flex items-center gap-2' },
+                h('p', { className: 'font-semibold text-[15px]' }, m.name),
+                h('button', { onClick: () => setEditingMember(m), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit')
+              ),
+              h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone)
+            )
           ),
           h(Stamp, { paid: outstanding.length === 0, label: statusLabel })
         ),
@@ -343,8 +382,13 @@ function App() {
           const totalDue = outstanding.length * Number(m.fee);
           return h('tr', { key: m.id, style: { borderColor: COLORS.border }, className: i < members.length - 1 ? 'border-b' : '' },
             h('td', { className: 'px-3 py-2' },
-              h('div', { className: 'font-medium' }, m.name),
-              h('div', { style: { color: COLORS.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-xs' }, '+91 ' + m.phone)
+              h('div', { className: 'flex items-center gap-2' },
+                m.photo ? h('img', { src: m.photo, className: 'w-6 h-6 rounded-full object-cover', style: { border: '1px solid ' + COLORS.border } }) : null,
+                h('div', null,
+                  h('div', { className: 'font-medium' }, m.name),
+                  h('div', { style: { color: COLORS.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-xs' }, '+91 ' + m.phone)
+                )
+              )
             ),
             h('td', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-right px-3 py-2' }, '\u20B9' + Number(m.fee).toLocaleString('en-IN')),
             h('td', { className: 'text-right px-3 py-2' },
@@ -357,6 +401,14 @@ function App() {
       )
     )
   );
+
+  const pendingCount = members.filter(m => outstandingMonths(m, payments).length > 0).length;
+
+  const remindAllButton = pendingCount > 0 ? h('button', {
+    onClick: () => setRemindQueue(members.filter(m => outstandingMonths(m, payments).length > 0)),
+    style: { backgroundColor: COLORS.redInk, color: COLORS.paperLight },
+    className: 'w-full rounded-lg py-2.5 text-sm font-medium mb-4'
+  }, '\uD83D\uDCAC Remind All Pending (' + pendingCount + ')') : null;
 
   const viewToggle = h('div', { className: 'flex gap-2 mb-4' },
     h('button', {
@@ -376,6 +428,7 @@ function App() {
     : h(React.Fragment, null,
         errorBox,
         members.length === 0 ? emptyState : h(React.Fragment, null,
+          remindAllButton,
           viewToggle,
           viewMode === 'table' ? tableView : memberCards
         ),
@@ -401,6 +454,7 @@ function App() {
     ),
     showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
     editingMember ? h(EditMemberModal, { member: editingMember, onClose: () => setEditingMember(null), onSave: editMember, colors: COLORS }) : null,
+    remindQueue ? h(RemindAllModal, { queue: remindQueue, onClose: () => setRemindQueue(null), onSend: sendReminder, colors: COLORS }) : null,
     markPaidFor ? h(MarkPaidModal, {
       onClose: () => setMarkPaidFor(null),
       saving: saving,
@@ -411,6 +465,56 @@ function App() {
     lightbox ? h('div', { className: 'fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50', onClick: () => setLightbox(null) },
       h('img', { src: lightbox, className: 'max-w-full max-h-full rounded-lg' })
     ) : null
+  );
+}
+
+function RemindAllModal(props) {
+  const queue = props.queue, onClose = props.onClose, onSend = props.onSend, colors = props.colors;
+  const [index, setIndex] = useState(0);
+  const done = index >= queue.length;
+  const current = !done ? queue[index] : null;
+
+  function handleSendAndNext() {
+    onSend(current);
+    setIndex(index + 1);
+  }
+  function handleSkip() {
+    setIndex(index + 1);
+  }
+
+  return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+      h('div', { className: 'flex items-center justify-between mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, done ? 'All done' : ('Reminder ' + (index + 1) + ' of ' + queue.length)),
+        h('button', { onClick: onClose }, '\u2715')
+      ),
+      done
+        ? h('div', { className: 'text-center py-6' },
+            h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'You\u2019ve gone through everyone with dues pending.'),
+            h('button', {
+              onClick: onClose,
+              style: { backgroundColor: colors.ink, color: colors.paperLight },
+              className: 'rounded-md py-2.5 px-6 text-sm font-medium'
+            }, 'Close')
+          )
+        : h(React.Fragment, null,
+            h('div', { className: 'flex flex-col items-center mb-5' },
+              current.photo ? h('img', { src: current.photo, className: 'w-16 h-16 rounded-full object-cover mb-2', style: { border: '1px solid ' + colors.border } }) : null,
+              h('p', { className: 'font-semibold text-lg' }, current.name),
+              h('p', { style: { color: colors.inkSoft }, className: 'text-xs' }, '+91 ' + current.phone)
+            ),
+            h('button', {
+              onClick: handleSendAndNext,
+              style: { backgroundColor: colors.ink, color: colors.paperLight },
+              className: 'w-full rounded-md py-3 text-sm font-medium mb-2'
+            }, '\uD83D\uDCAC Open WhatsApp & Next'),
+            h('button', {
+              onClick: handleSkip,
+              style: { color: colors.inkSoft },
+              className: 'w-full text-xs py-2 hover:underline'
+            }, 'Skip this one')
+          )
+    )
   );
 }
 
@@ -441,15 +545,22 @@ function AddMemberModal(props) {
   const [phone, setPhone] = useState('');
   const [fee, setFee] = useState('');
   const [joinedMonth, setJoinedMonth] = useState(monthKey(new Date()));
+  const [photo, setPhoto] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
+  const photoInputRef = useRef(null);
   const phoneValid = /^\d{10}$/.test(phone);
   const canAdd = name.trim().length > 1 && phoneValid && Number(fee) > 0;
+
+  async function handlePhotoChange(file) {
+    if (!file) return;
+    try { const compressed = await compressPhoto(file); setPhoto(compressed); } catch (e) {}
+  }
 
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onAdd(name.trim(), phone, fee, joinedMonth);
+    const errMsg = await onAdd(name.trim(), phone, fee, joinedMonth, photo);
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -459,6 +570,14 @@ function AddMemberModal(props) {
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'New entry'),
         h('button', { onClick: onClose }, '\u2715')
+      ),
+      h('div', { className: 'flex justify-center mb-4' },
+        h('input', { ref: photoInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handlePhotoChange(e.target.files[0]) }),
+        h('button', {
+          onClick: () => photoInputRef.current.click(),
+          style: { borderColor: colors.border, backgroundColor: colors.paper },
+          className: 'w-16 h-16 rounded-full border flex items-center justify-center overflow-hidden'
+        }, photo ? h('img', { src: photo, className: 'w-full h-full object-cover' }) : h('span', { style: { color: colors.inkSoft }, className: 'text-xs' }, 'Photo'))
       ),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Student name'),
       h('input', { value: name, onChange: e => setName(e.target.value), placeholder: 'e.g. Aarav Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
@@ -489,15 +608,22 @@ function EditMemberModal(props) {
   const [name, setName] = useState(member.name);
   const [phone, setPhone] = useState(member.phone);
   const [fee, setFee] = useState(String(member.fee));
+  const [photo, setPhoto] = useState(member.photo || null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
+  const photoInputRef = useRef(null);
   const phoneValid = /^\d{10}$/.test(phone);
   const canSave = name.trim().length > 1 && phoneValid && Number(fee) > 0;
+
+  async function handlePhotoChange(file) {
+    if (!file) return;
+    try { const compressed = await compressPhoto(file); setPhoto(compressed); } catch (e) {}
+  }
 
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onSave(member.id, name.trim(), phone, fee);
+    const errMsg = await onSave(member.id, name.trim(), phone, fee, photo);
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -507,6 +633,14 @@ function EditMemberModal(props) {
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit student'),
         h('button', { onClick: onClose }, '\u2715')
+      ),
+      h('div', { className: 'flex justify-center mb-4' },
+        h('input', { ref: photoInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handlePhotoChange(e.target.files[0]) }),
+        h('button', {
+          onClick: () => photoInputRef.current.click(),
+          style: { borderColor: colors.border, backgroundColor: colors.paper },
+          className: 'w-16 h-16 rounded-full border flex items-center justify-center overflow-hidden'
+        }, photo ? h('img', { src: photo, className: 'w-full h-full object-cover' }) : h('span', { style: { color: colors.inkSoft }, className: 'text-xs' }, 'Photo'))
       ),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Student name'),
       h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
