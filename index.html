@@ -161,6 +161,7 @@ function App() {
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [remindQueue, setRemindQueue] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState('');
   const [installPrompt, setInstallPrompt] = useState(null);
 
@@ -212,17 +213,27 @@ function App() {
     setSaving(false);
   }
 
-  async function addMember(name, phone, fee, joinedMonth, photo) {
+  async function recoverAccount(upi) {
+    const res = await sb.from('tutors').select('*').eq('upi_id', upi.trim()).maybeSingle();
+    if (res.error) return 'Something went wrong. Please try again.';
+    if (!res.data) return 'No account found with that UPI ID. Check it matches exactly what you used before.';
+    localStorage.setItem('tutor_id', res.data.id);
+    setTutorId(res.data.id);
+    await loadData(res.data.id);
+    return null;
+  }
+
+  async function addMember(name, phone, fee, joinedMonth, photo, studentClass, parentName) {
     const res = await sb.from('members')
-      .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth, photo: photo }).select().single();
+      .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth, photo: photo, student_class: studentClass, parent_name: parentName }).select().single();
     if (res.error) { return res.error.message || 'Could not add student.'; }
     setMembers(members.concat([res.data]));
     setShowAdd(false);
     return null;
   }
 
-  async function editMember(memberId, name, phone, fee, photo) {
-    const updates = { name: name, phone: phone, fee: Number(fee) };
+  async function editMember(memberId, name, phone, fee, photo, studentClass, parentName) {
+    const updates = { name: name, phone: phone, fee: Number(fee), student_class: studentClass, parent_name: parentName };
     if (photo !== undefined) updates.photo = photo;
     const res = await sb.from('members')
       .update(updates).eq('id', memberId).select().single();
@@ -302,8 +313,17 @@ function App() {
     h('p', { className: 'text-sm' }, 'No entries yet.', h('br'), 'Add your first student to begin your register.')
   );
 
+  const filteredMembers = members.filter(function(m) {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (m.name && m.name.toLowerCase().indexOf(q) >= 0) ||
+      (m.student_class && m.student_class.toLowerCase().indexOf(q) >= 0) ||
+      (m.parent_name && m.parent_name.toLowerCase().indexOf(q) >= 0) ||
+      (m.phone && m.phone.indexOf(q) >= 0);
+  });
+
   const memberCards = h('div', { className: 'space-y-3 mb-5' },
-    members.map((m) => {
+    filteredMembers.map((m) => {
       const outstanding = outstandingMonths(m, payments);
       const allMonths = studentMonths(m).slice().reverse();
       const totalDue = outstanding.length * Number(m.fee);
@@ -339,7 +359,10 @@ function App() {
                 h('p', { className: 'font-semibold text-[15px]' }, m.name),
                 h('button', { onClick: () => setEditingMember(m), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit')
               ),
-              h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone)
+              h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone),
+              (m.student_class || m.parent_name) ? h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs mt-0.5' },
+                [m.student_class, m.parent_name].filter(Boolean).join(' \u2022 ')
+              ) : null
             )
           ),
           h(Stamp, { paid: outstanding.length === 0, label: statusLabel })
@@ -377,10 +400,10 @@ function App() {
         )
       ),
       h('tbody', null,
-        members.map(function(m, i) {
+        filteredMembers.map(function(m, i) {
           const outstanding = outstandingMonths(m, payments);
           const totalDue = outstanding.length * Number(m.fee);
-          return h('tr', { key: m.id, style: { borderColor: COLORS.border }, className: i < members.length - 1 ? 'border-b' : '' },
+          return h('tr', { key: m.id, style: { borderColor: COLORS.border }, className: i < filteredMembers.length - 1 ? 'border-b' : '' },
             h('td', { className: 'px-3 py-2' },
               h('div', { className: 'flex items-center gap-2' },
                 m.photo ? h('img', { src: m.photo, className: 'w-6 h-6 rounded-full object-cover', style: { border: '1px solid ' + COLORS.border } }) : null,
@@ -410,6 +433,14 @@ function App() {
     className: 'w-full rounded-lg py-2.5 text-sm font-medium mb-4'
   }, '\uD83D\uDCAC Remind All Pending (' + pendingCount + ')') : null;
 
+  const searchBox = members.length > 5 ? h('input', {
+    value: searchQuery,
+    onChange: e => setSearchQuery(e.target.value),
+    placeholder: 'Search by name, class, or parent\u2026',
+    style: { borderColor: COLORS.border },
+    className: 'w-full border rounded-md px-3 py-2 text-sm mb-4 bg-white/60'
+  }) : null;
+
   const viewToggle = h('div', { className: 'flex gap-2 mb-4' },
     h('button', {
       onClick: () => setViewMode('cards'),
@@ -424,11 +455,12 @@ function App() {
   );
 
   const mainContent = !profile
-    ? h(Onboarding, { onSave: createTutor, saving: saving, colors: COLORS })
+    ? h(Onboarding, { onSave: createTutor, onRecover: recoverAccount, saving: saving, colors: COLORS })
     : h(React.Fragment, null,
         errorBox,
         members.length === 0 ? emptyState : h(React.Fragment, null,
           remindAllButton,
+          searchBox,
           viewToggle,
           viewMode === 'table' ? tableView : memberCards
         ),
@@ -519,10 +551,40 @@ function RemindAllModal(props) {
 }
 
 function Onboarding(props) {
-  const onSave = props.onSave, saving = props.saving, colors = props.colors;
+  const onSave = props.onSave, onRecover = props.onRecover, saving = props.saving, colors = props.colors;
+  const [mode, setMode] = useState('new');
   const [name, setName] = useState('');
   const [upi, setUpi] = useState('');
+  const [recoverUpi, setRecoverUpi] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [recoverError, setRecoverError] = useState('');
   const canSave = name.trim().length > 1 && upi.trim().length > 3;
+
+  async function handleRecover() {
+    setRecovering(true);
+    setRecoverError('');
+    const errMsg = await onRecover(recoverUpi);
+    setRecovering(false);
+    if (errMsg) setRecoverError(errMsg);
+  }
+
+  if (mode === 'recover') {
+    return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
+      h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Recover your register'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter the UPI ID you used when you first set up your register.'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
+      h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
+      recoverError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3 mt-2' }, recoverError) : h('div', { className: 'mb-4' }),
+      h('button', {
+        disabled: recoverUpi.trim().length < 4 || recovering,
+        onClick: handleRecover,
+        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (recoverUpi.trim().length < 4 || recovering) ? 0.5 : 1 },
+        className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
+      }, recovering ? 'Looking up\u2026' : 'Recover my register'),
+      h('button', { onClick: () => setMode('new'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Back to set up a new register')
+    );
+  }
+
   return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
     h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Set up your register'),
     h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Used to generate your payment links and reminder messages.'),
@@ -534,8 +596,9 @@ function Onboarding(props) {
       disabled: !canSave || saving,
       onClick: () => onSave(name.trim(), upi.trim()),
       style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canSave || saving) ? 0.5 : 1 },
-      className: 'w-full rounded-md py-2.5 text-sm font-medium'
-    }, saving ? 'Saving\u2026' : 'Start my register')
+      className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
+    }, saving ? 'Saving\u2026' : 'Start my register'),
+    h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Already have a register? Recover it')
   );
 }
 
@@ -546,6 +609,8 @@ function AddMemberModal(props) {
   const [fee, setFee] = useState('');
   const [joinedMonth, setJoinedMonth] = useState(monthKey(new Date()));
   const [photo, setPhoto] = useState(null);
+  const [studentClass, setStudentClass] = useState('');
+  const [parentName, setParentName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const photoInputRef = useRef(null);
@@ -560,7 +625,7 @@ function AddMemberModal(props) {
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onAdd(name.trim(), phone, fee, joinedMonth, photo);
+    const errMsg = await onAdd(name.trim(), phone, fee, joinedMonth, photo, studentClass.trim(), parentName.trim());
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -587,7 +652,11 @@ function AddMemberModal(props) {
         h('input', { value: phone, onChange: e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
       ),
       (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : null,
-      h('label', { className: 'block text-xs font-medium mb-1 mt-2' }, 'Monthly fee (\u20B9)'),
+      h('label', { className: 'block text-xs font-medium mb-1 mt-2' }, 'Class / grade (optional)'),
+      h('input', { value: studentClass, onChange: e => setStudentClass(e.target.value), placeholder: 'e.g. Class 8', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's name (optional)"),
+      h('input', { value: parentName, onChange: e => setParentName(e.target.value), placeholder: 'e.g. Mrs. Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (\u20B9)'),
       h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), placeholder: 'e.g. 1500', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Student since'),
       h('input', { type: 'month', value: joinedMonth, onChange: e => setJoinedMonth(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
@@ -609,6 +678,8 @@ function EditMemberModal(props) {
   const [phone, setPhone] = useState(member.phone);
   const [fee, setFee] = useState(String(member.fee));
   const [photo, setPhoto] = useState(member.photo || null);
+  const [studentClass, setStudentClass] = useState(member.student_class || '');
+  const [parentName, setParentName] = useState(member.parent_name || '');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const photoInputRef = useRef(null);
@@ -623,7 +694,7 @@ function EditMemberModal(props) {
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onSave(member.id, name.trim(), phone, fee, photo);
+    const errMsg = await onSave(member.id, name.trim(), phone, fee, photo, studentClass.trim(), parentName.trim());
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -650,7 +721,11 @@ function EditMemberModal(props) {
         h('input', { value: phone, onChange: e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10)), style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
       ),
       (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : null,
-      h('label', { className: 'block text-xs font-medium mb-1 mt-2' }, 'Monthly fee (\u20B9)'),
+      h('label', { className: 'block text-xs font-medium mb-1 mt-2' }, 'Class / grade (optional)'),
+      h('input', { value: studentClass, onChange: e => setStudentClass(e.target.value), placeholder: 'e.g. Class 8', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's name (optional)"),
+      h('input', { value: parentName, onChange: e => setParentName(e.target.value), placeholder: 'e.g. Mrs. Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (\u20B9)'),
       h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'This updates their fee going forward \u2014 months already marked paid are not affected.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
