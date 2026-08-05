@@ -213,11 +213,12 @@ function App() {
   async function createTutor(name, upi, pin) {
     setSaving(true);
     const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin }).select().single();
-    if (res.error) { setError('Could not create your register. Please try again.'); setSaving(false); return; }
+    if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     setProfile(res.data);
     setSaving(false);
+    return null;
   }
 
   async function recoverAccount(upi, pin) {
@@ -587,6 +588,7 @@ function Onboarding(props) {
   const [name, setName] = useState('');
   const [upi, setUpi] = useState('');
   const [pin, setPin] = useState('');
+  const [setupError, setSetupError] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
   const [recoverPin, setRecoverPin] = useState('');
   const [recovering, setRecovering] = useState(false);
@@ -595,6 +597,12 @@ function Onboarding(props) {
   const canSave = name.trim().length > 1 && upi.trim().length > 3 && pinValid;
   const recoverPinValid = /^\d{4}$/.test(recoverPin);
   const canRecover = recoverUpi.trim().length > 3 && recoverPinValid;
+
+  async function handleSave() {
+    setSetupError('');
+    const errMsg = await onSave(name.trim(), upi.trim(), pin);
+    if (errMsg) setSetupError(errMsg);
+  }
 
   async function handleRecover() {
     setRecovering(true);
@@ -633,9 +641,10 @@ function Onboarding(props) {
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
     h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '\u2022\u2022\u2022\u2022', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
     h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this \u2014 you\u2019ll need it along with your UPI ID to recover your account if you lose access.'),
+    setupError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, setupError) : null,
     h('button', {
       disabled: !canSave || saving,
-      onClick: () => onSave(name.trim(), upi.trim(), pin),
+      onClick: handleSave,
       style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canSave || saving) ? 0.5 : 1 },
       className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
     }, saving ? 'Saving\u2026' : 'Start my register'),
