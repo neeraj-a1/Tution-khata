@@ -293,6 +293,32 @@ function App() {
     setMarkPaidFor(null);
   }
 
+  function exportCSV() {
+    const rows = [['Student Name', 'Phone', 'Class', 'Parent Name', 'Fee', 'Month', 'Status', 'Paid On']];
+    members.forEach(function(m) {
+      studentMonths(m).forEach(function(mk) {
+        const p = payments[m.id + '_' + mk];
+        const isPaid = !!(p && p.paid);
+        rows.push([
+          m.name, m.phone, m.student_class || '', m.parent_name || '', m.fee,
+          monthLabel(mk), isPaid ? 'Paid' : 'Pending', isPaid ? formatDate(p.paid_at) : ''
+        ]);
+      });
+    });
+    const csv = rows.map(function(r) {
+      return r.map(function(cell) { return '"' + String(cell).replace(/"/g, '""') + '"'; }).join(',');
+    }).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tuition-khata-backup-' + monthKey(new Date()) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   function handleLogout() {
     if (!window.confirm('Log out of this register on this device? You can log back in anytime with your UPI ID and PIN.')) return;
     localStorage.removeItem('tutor_id');
@@ -452,6 +478,26 @@ function App() {
 
   const pendingCount = members.filter(m => outstandingMonths(m, payments).length > 0).length;
 
+  const thisMonthKey = monthKey(new Date());
+  let collectedThisMonth = 0, pendingThisMonth = 0;
+  members.forEach(function(m) {
+    if (studentMonths(m).indexOf(thisMonthKey) >= 0) {
+      const p = payments[m.id + '_' + thisMonthKey];
+      if (p && p.paid) collectedThisMonth += Number(m.fee);
+      else pendingThisMonth += Number(m.fee);
+    }
+  });
+  const summaryLine = members.length > 0 ? h('div', {
+    style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border },
+    className: 'rounded-lg border px-4 py-3 mb-4 flex items-center justify-between text-sm'
+  },
+    h('span', null,
+      h('span', { style: { color: COLORS.inkSoft } }, 'This month: '),
+      h('span', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.greenInk } }, '\u20B9' + collectedThisMonth.toLocaleString('en-IN') + ' collected')
+    ),
+    pendingThisMonth > 0 ? h('span', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.redInk } }, '\u20B9' + pendingThisMonth.toLocaleString('en-IN') + ' pending') : null
+  ) : null;
+
   const remindAllButton = pendingCount > 0 ? h('button', {
     onClick: () => setRemindQueue(members.filter(m => outstandingMonths(m, payments).length > 0)),
     style: { backgroundColor: COLORS.redInk, color: COLORS.paperLight },
@@ -484,6 +530,7 @@ function App() {
     : h(React.Fragment, null,
         errorBox,
         members.length === 0 ? emptyState : h(React.Fragment, null,
+          summaryLine,
           remindAllButton,
           searchBox,
           viewToggle,
@@ -504,6 +551,7 @@ function App() {
       h('div', { className: 'flex items-center justify-between mb-6 ml-8' },
         h('p', { style: { color: COLORS.inkSoft }, className: 'text-sm' }, 'your fee register'),
         profile ? h('div', { className: 'flex items-center gap-3' },
+          members.length > 0 ? h('button', { onClick: exportCSV, style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Download backup') : null,
           h('button', { onClick: () => setEditingProfile(true), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit profile'),
           h('button', { onClick: handleLogout, style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Log out')
         ) : null
