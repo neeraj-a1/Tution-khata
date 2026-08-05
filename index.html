@@ -203,9 +203,9 @@ function App() {
     setLoading(false);
   }
 
-  async function createTutor(name, upi) {
+  async function createTutor(name, upi, pin) {
     setSaving(true);
-    const res = await sb.from('tutors').insert({ name: name, upi_id: upi }).select().single();
+    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin }).select().single();
     if (res.error) { setError('Could not create your register. Please try again.'); setSaving(false); return; }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
@@ -213,10 +213,10 @@ function App() {
     setSaving(false);
   }
 
-  async function recoverAccount(upi) {
-    const res = await sb.from('tutors').select('*').eq('upi_id', upi.trim()).maybeSingle();
+  async function recoverAccount(upi, pin) {
+    const res = await sb.from('tutors').select('*').eq('upi_id', upi.trim()).eq('recovery_pin', pin.trim()).maybeSingle();
     if (res.error) return 'Something went wrong. Please try again.';
-    if (!res.data) return 'No account found with that UPI ID. Check it matches exactly what you used before.';
+    if (!res.data) return 'No matching account found. Check your UPI ID and PIN are exactly right.';
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     await loadData(res.data.id);
@@ -555,15 +555,20 @@ function Onboarding(props) {
   const [mode, setMode] = useState('new');
   const [name, setName] = useState('');
   const [upi, setUpi] = useState('');
+  const [pin, setPin] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
+  const [recoverPin, setRecoverPin] = useState('');
   const [recovering, setRecovering] = useState(false);
   const [recoverError, setRecoverError] = useState('');
-  const canSave = name.trim().length > 1 && upi.trim().length > 3;
+  const pinValid = /^\d{4}$/.test(pin);
+  const canSave = name.trim().length > 1 && upi.trim().length > 3 && pinValid;
+  const recoverPinValid = /^\d{4}$/.test(recoverPin);
+  const canRecover = recoverUpi.trim().length > 3 && recoverPinValid;
 
   async function handleRecover() {
     setRecovering(true);
     setRecoverError('');
-    const errMsg = await onRecover(recoverUpi);
+    const errMsg = await onRecover(recoverUpi, recoverPin);
     setRecovering(false);
     if (errMsg) setRecoverError(errMsg);
   }
@@ -571,14 +576,16 @@ function Onboarding(props) {
   if (mode === 'recover') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
       h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Recover your register'),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter the UPI ID you used when you first set up your register.'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter the UPI ID and 4-digit PIN you set up with.'),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
-      h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
+      h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your 4-digit PIN'),
+      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
       recoverError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3 mt-2' }, recoverError) : h('div', { className: 'mb-4' }),
       h('button', {
-        disabled: recoverUpi.trim().length < 4 || recovering,
+        disabled: !canRecover || recovering,
         onClick: handleRecover,
-        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (recoverUpi.trim().length < 4 || recovering) ? 0.5 : 1 },
+        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canRecover || recovering) ? 0.5 : 1 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
       }, recovering ? 'Looking up\u2026' : 'Recover my register'),
       h('button', { onClick: () => setMode('new'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Back to set up a new register')
@@ -591,10 +598,13 @@ function Onboarding(props) {
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
     h('input', { value: name, onChange: e => setName(e.target.value), placeholder: 'e.g. Priya Sharma', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
-    h('input', { value: upi, onChange: e => setUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-4 bg-white/60' }),
+    h('input', { value: upi, onChange: e => setUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
+    h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '\u2022\u2022\u2022\u2022', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this \u2014 you\u2019ll need it along with your UPI ID to recover your account if you lose access.'),
     h('button', {
       disabled: !canSave || saving,
-      onClick: () => onSave(name.trim(), upi.trim()),
+      onClick: () => onSave(name.trim(), upi.trim(), pin),
       style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canSave || saving) ? 0.5 : 1 },
       className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
     }, saving ? 'Saving\u2026' : 'Start my register'),
