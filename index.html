@@ -17,8 +17,11 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
   body { margin: 0; }
 </style>
 
@@ -162,6 +165,7 @@ function App() {
   const [lightbox, setLightbox] = useState(null);
   const [remindQueue, setRemindQueue] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingProfile, setEditingProfile] = useState(false);
   const [error, setError] = useState('');
   const [installPrompt, setInstallPrompt] = useState(null);
 
@@ -188,9 +192,12 @@ function App() {
 
   async function loadData(id) {
     setLoading(true);
-    const t = await sb.from('tutors').select('*').eq('id', id).single();
+    const results = await Promise.all([
+      sb.from('tutors').select('*').eq('id', id).single(),
+      sb.from('members').select('*').eq('tutor_id', id)
+    ]);
+    const t = results[0], m = results[1];
     if (t.data) setProfile(t.data);
-    const m = await sb.from('members').select('*').eq('tutor_id', id);
     const mem = m.data || [];
     setMembers(mem);
     if (mem.length) {
@@ -285,8 +292,16 @@ function App() {
     setMarkPaidFor(null);
   }
 
+  async function updateProfile(name, upi) {
+    const res = await sb.from('tutors').update({ name: name, upi_id: upi }).eq('id', tutorId).select().single();
+    if (res.error) return res.error.message || 'Could not update profile.';
+    setProfile(res.data);
+    setEditingProfile(false);
+    return null;
+  }
+
   function sendReceipt(member, mk, payment) {
-    const msg = "\u2705 Payment Received\n\nStudent: " + member.name + "\nMonth: " + monthLabel(mk) +
+    const msg = "\u2705 Payment Received\n\nTutor: " + profile.name + "\nStudent: " + member.name + "\nMonth: " + monthLabel(mk) +
       "\nAmount: Rs." + member.fee + "\nReceived on: " + formatDate(payment.paid_at) +
       "\n\nThank you!\n\u2014 " + profile.name + " (via Tuition Khata)";
     const digits = member.phone.replace(/\D/g, '');
@@ -476,7 +491,10 @@ function App() {
         h('span', { className: 'text-2xl' }, '\uD83D\uDCD6'),
         h('h1', { style: { fontFamily: "'Arvo', serif" }, className: 'text-2xl font-bold tracking-tight' }, 'Tuition Khata')
       ),
-      h('p', { style: { color: COLORS.inkSoft }, className: 'text-sm mb-6 ml-8' }, 'your fee register'),
+      h('div', { className: 'flex items-center justify-between mb-6 ml-8' },
+        h('p', { style: { color: COLORS.inkSoft }, className: 'text-sm' }, 'your fee register'),
+        profile ? h('button', { onClick: () => setEditingProfile(true), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit profile') : null
+      ),
       installPrompt ? h('button', {
         onClick: handleInstallClick,
         style: { backgroundColor: COLORS.ink, color: COLORS.paperLight },
@@ -487,6 +505,7 @@ function App() {
     showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
     editingMember ? h(EditMemberModal, { member: editingMember, onClose: () => setEditingMember(null), onSave: editMember, colors: COLORS }) : null,
     remindQueue ? h(RemindAllModal, { queue: remindQueue, onClose: () => setRemindQueue(null), onSend: sendReminder, colors: COLORS }) : null,
+    editingProfile ? h(ProfileEditModal, { profile: profile, onClose: () => setEditingProfile(false), onSave: updateProfile, colors: COLORS }) : null,
     markPaidFor ? h(MarkPaidModal, {
       onClose: () => setMarkPaidFor(null),
       saving: saving,
@@ -609,6 +628,45 @@ function Onboarding(props) {
       className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
     }, saving ? 'Saving\u2026' : 'Start my register'),
     h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Already have a register? Recover it')
+  );
+}
+
+function ProfileEditModal(props) {
+  const profile = props.profile, onClose = props.onClose, onSave = props.onSave, colors = props.colors;
+  const [name, setName] = useState(profile.name);
+  const [upi, setUpi] = useState(profile.upi_id);
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const canSave = name.trim().length > 1 && upi.trim().length > 3;
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setLocalError('');
+    const errMsg = await onSave(name.trim(), upi.trim());
+    setSubmitting(false);
+    if (errMsg) setLocalError(errMsg);
+  }
+
+  return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+      h('div', { className: 'flex items-center justify-between mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit your profile'),
+        h('button', { onClick: onClose }, '\u2715')
+      ),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'This name and UPI ID are used on every reminder and receipt you send.'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
+      h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
+      h('input', { value: upi, onChange: e => setUpi(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Note: your recovery PIN stays the same \u2014 this only changes what parents see.'),
+      localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
+      h('button', {
+        disabled: !canSave || submitting,
+        onClick: handleSubmit,
+        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canSave && !submitting) ? 1 : 0.5 },
+        className: 'w-full rounded-md py-2.5 text-sm font-medium'
+      }, submitting ? 'Saving\u2026' : 'Save changes')
+    )
   );
 }
 
