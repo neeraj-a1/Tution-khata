@@ -266,7 +266,7 @@ function App() {
     const breakdown = outstanding.length > 1
       ? ' (' + outstanding.length + ' months \u00d7 Rs.' + member.fee + ')'
       : '';
-    const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nPending: " + monthsList +
+    const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
       "\nTotal due: Rs." + total + breakdown +
       "\n\nPay here: " + upiLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n\u2014 sent via Tuition Khata";
     const digits = member.phone.replace(/\D/g, '');
@@ -290,6 +290,15 @@ function App() {
     setPayments(next);
     setSaving(false);
     setMarkPaidFor(null);
+  }
+
+  function handleLogout() {
+    if (!window.confirm('Log out of this register on this device? You can log back in anytime with your UPI ID and PIN.')) return;
+    localStorage.removeItem('tutor_id');
+    setTutorId(null);
+    setProfile(null);
+    setMembers([]);
+    setPayments({});
   }
 
   async function updateProfile(name, upi) {
@@ -493,7 +502,10 @@ function App() {
       ),
       h('div', { className: 'flex items-center justify-between mb-6 ml-8' },
         h('p', { style: { color: COLORS.inkSoft }, className: 'text-sm' }, 'your fee register'),
-        profile ? h('button', { onClick: () => setEditingProfile(true), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit profile') : null
+        profile ? h('div', { className: 'flex items-center gap-3' },
+          h('button', { onClick: () => setEditingProfile(true), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit profile'),
+          h('button', { onClick: handleLogout, style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Log out')
+        ) : null
       ),
       installPrompt ? h('button', {
         onClick: handleInstallClick,
