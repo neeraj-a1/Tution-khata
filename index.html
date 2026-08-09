@@ -166,6 +166,7 @@ function App() {
   const [remindQueue, setRemindQueue] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingProfile, setEditingProfile] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [error, setError] = useState('');
   const [installPrompt, setInstallPrompt] = useState(null);
 
@@ -548,12 +549,37 @@ function App() {
         h('span', { className: 'text-2xl' }, '\uD83D\uDCD6'),
         h('h1', { style: { fontFamily: "'Arvo', serif" }, className: 'text-2xl font-bold tracking-tight' }, 'Tuition Khata')
       ),
-      h('div', { className: 'flex items-center justify-between mb-6 ml-8' },
+      h('div', { className: 'flex items-center justify-between mb-6 ml-8 relative' },
         h('p', { style: { color: COLORS.inkSoft }, className: 'text-sm' }, 'your fee register'),
-        profile ? h('div', { className: 'flex items-center gap-3' },
-          members.length > 0 ? h('button', { onClick: exportCSV, style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Download backup') : null,
-          h('button', { onClick: () => setEditingProfile(true), style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Edit profile'),
-          h('button', { onClick: handleLogout, style: { color: COLORS.inkSoft }, className: 'text-xs hover:underline' }, 'Log out')
+        profile ? h('div', { className: 'relative' },
+          h('button', {
+            onClick: () => setShowMenu(!showMenu),
+            style: { color: COLORS.inkSoft, borderColor: COLORS.border },
+            className: 'w-8 h-8 rounded-full border flex items-center justify-center text-lg leading-none'
+          }, '\u22EF'),
+          showMenu ? h(React.Fragment, null,
+            h('div', { className: 'fixed inset-0 z-40', onClick: () => setShowMenu(false) }),
+            h('div', {
+              style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border },
+              className: 'absolute right-0 top-10 w-44 rounded-lg border shadow-lg z-50 overflow-hidden'
+            },
+              members.length > 0 ? h('button', {
+                onClick: () => { exportCSV(); setShowMenu(false); },
+                style: { color: COLORS.ink },
+                className: 'w-full text-left px-4 py-2.5 text-sm hover:bg-black/5'
+              }, 'Download backup') : null,
+              h('button', {
+                onClick: () => { setEditingProfile(true); setShowMenu(false); },
+                style: { color: COLORS.ink },
+                className: 'w-full text-left px-4 py-2.5 text-sm hover:bg-black/5'
+              }, 'Edit profile'),
+              h('button', {
+                onClick: () => { setShowMenu(false); handleLogout(); },
+                style: { color: COLORS.redInk },
+                className: 'w-full text-left px-4 py-2.5 text-sm hover:bg-black/5'
+              }, 'Log out')
+            )
+          ) : null
         ) : null
       ),
       installPrompt ? h('button', {
