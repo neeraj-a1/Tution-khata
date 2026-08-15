@@ -38,6 +38,24 @@
     }
   }
 </script>
+
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '1058970550044041');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=1058970550044041&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Meta Pixel Code -->
 </head>
 <body>
 <div id="root"></div>
@@ -215,6 +233,7 @@ function App() {
     setSaving(true);
     const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin }).select().single();
     if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
+    if (typeof fbq === 'function') { fbq('track', 'CompleteRegistration'); }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     setProfile(res.data);
@@ -693,7 +712,7 @@ function Onboarding(props) {
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
       h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your 4-digit PIN'),
-      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '\u2022\u2022\u2022\u2022', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
       recoverError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3 mt-2' }, recoverError) : h('div', { className: 'mb-4' }),
       h('button', {
         disabled: !canRecover || recovering,
