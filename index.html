@@ -176,6 +176,16 @@ function App() {
   }, []);
   async function loadData(id) {
     setLoading(true);
+    // NEW: quietly records that this tutor's dashboard just loaded —
+    // i.e. that they came back after signing up. Fire-and-forget on
+    // purpose: nothing here should ever slow the dashboard down or
+    // show an error if it fails, and nothing about it is visible to
+    // the tutor. Deliberately only called from loadData, which only
+    // ever runs for an EXISTING tutor (a page reload with a saved
+    // login, or Recover / Forgot PIN) — never on first signup itself
+    // — so a tutor who signed up and never once came back keeps
+    // last_active_at as null, which is exactly the signal we want.
+    sb.from('tutors').update({ last_active_at: new Date().toISOString() }).eq('id', id).then(() => {});
     const results = await Promise.all([
       sb.from('tutors').select('*').eq('id', id).single(),
       sb.from('members').select('*').eq('tutor_id', id)
