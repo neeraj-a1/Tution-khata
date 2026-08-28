@@ -20,6 +20,16 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   body { margin: 0; }
+  /* NEW: on laptop-size screens and up (1024px+), shrink the whole
+     app display by 10%. Tailwind's spacing, text, and rounding
+     utilities are all rem-based, so scaling the root font-size scales
+     everything on the page proportionally — text, padding, gaps,
+     card widths, button heights, all of it — without having to touch
+     every individual class. Mobile is completely unaffected, since
+     this only applies above the 1024px breakpoint. */
+  @media (min-width: 1024px) {
+    html { font-size: 90%; }
+  }
 </style>
 <script>
   tailwind.config = {
@@ -810,7 +820,7 @@ function Onboarding(props) {
       h('input', { value: phone, onChange: e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
     ),
     (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'So we can check in and help if you ever get stuck — never shared, never spammed.'),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'For check-ins only — never shared, never spammed.'),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
     h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
     h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this — you’ll need it along with your UPI ID to recover your account if you lose access.'),
