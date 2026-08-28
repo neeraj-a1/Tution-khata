@@ -11,20 +11,16 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Khata">
-
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
-
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-
 <style>
   body { margin: 0; }
 </style>
-
 <script>
   tailwind.config = {
     theme: {
@@ -38,50 +34,25 @@
     }
   }
 </script>
-
-<!-- Meta Pixel Code -->
-<script>
-!function(f,b,e,v,n,t,s)
-{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-n.queue=[];t=b.createElement(e);t.async=!0;
-t.src=v;s=b.getElementsByTagName(e)[0];
-s.parentNode.insertBefore(t,s)}(window, document,'script',
-'https://connect.facebook.net/en_US/fbevents.js');
-fbq('init', '1418734930159062');
-fbq('track', 'PageView');
-</script>
-<noscript><img height="1" width="1" style="display:none"
-src="https://www.facebook.com/tr?id=1418734930159062&ev=PageView&noscript=1"
-/></noscript>
-<!-- End Meta Pixel Code -->
 </head>
 <body>
 <div id="root"></div>
-
 <script>
 const { useState, useEffect, useRef } = React;
 const h = React.createElement;
-
 // ====================================================================
 const SUPABASE_URL = 'https://xgsbjyqdkeaeihzhadgs.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_vP7cJ9AA9Ubf5dVu_WxEkg_fuymQNU5';
 // ====================================================================
-
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
 const COLORS = {
   paper: '#E7E6D9', paperLight: '#F4F3EA', ink: '#1E2A3A',
   inkSoft: '#5C6357', redInk: '#A6321F', greenInk: '#2F6B3A', border: '#C9C7B4',
 };
-
 function monthKey(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
 function monthLabel(k) { const parts = k.split('-').map(Number); return MONTHS[parts[1]-1] + ' ' + parts[0]; }
 function formatDate(iso) { return new Date(iso).toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
-
 function monthsBetweenInclusive(startKey, endKey) {
   const s = startKey.split('-').map(Number);
   const e = endKey.split('-').map(Number);
@@ -94,20 +65,17 @@ function monthsBetweenInclusive(startKey, endKey) {
   }
   return out;
 }
-
 function studentMonths(member) {
   const startKey = member.joined_month || monthKey(new Date(member.created_at));
   const endKey = monthKey(new Date());
   return monthsBetweenInclusive(startKey, endKey);
 }
-
 function outstandingMonths(member, payments) {
   return studentMonths(member).filter(function(mk) {
     const p = payments[member.id + '_' + mk];
     return !(p && p.paid);
   });
 }
-
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -129,7 +97,6 @@ function compressImage(file) {
     reader.readAsDataURL(file);
   });
 }
-
 function compressPhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -152,7 +119,6 @@ function compressPhoto(file) {
     reader.readAsDataURL(file);
   });
 }
-
 function Stamp(props) {
   const paid = props.paid;
   const label = props.label || (paid ? 'Paid' : 'Pending');
@@ -167,7 +133,6 @@ function Stamp(props) {
     className: 'px-2 py-0.5 text-[11px] font-bold tracking-widest uppercase rounded-sm select-none'
   }, label);
 }
-
 function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -187,7 +152,10 @@ function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [error, setError] = useState('');
   const [installPrompt, setInstallPrompt] = useState(null);
-
+  // NEW: after the tutor's very first student is added, we show a
+  // prompt nudging them to add the rest of their class right away,
+  // instead of leaving with just one student on file.
+  const [justAddedFirst, setJustAddedFirst] = useState(null);
   useEffect(() => {
     function handler(e) {
       e.preventDefault();
@@ -196,19 +164,16 @@ function App() {
     window.addEventListener('beforeinstallprompt', handler);
     return function() { window.removeEventListener('beforeinstallprompt', handler); };
   }, []);
-
   function handleInstallClick() {
     if (!installPrompt) return;
     installPrompt.prompt();
     installPrompt.userChoice.then(function() { setInstallPrompt(null); });
   }
-
   useEffect(() => {
     const savedId = localStorage.getItem('tutor_id');
     if (savedId) { setTutorId(savedId); loadData(savedId); }
     else { setLoading(false); }
   }, []);
-
   async function loadData(id) {
     setLoading(true);
     const results = await Promise.all([
@@ -228,19 +193,19 @@ function App() {
     }
     setLoading(false);
   }
-
-  async function createTutor(name, upi, pin) {
+  // CHANGED: createTutor now also takes the tutor's own WhatsApp number
+  // and saves it to the new phone_number column, so Neeraj can check in
+  // with tutors who sign up and then go quiet.
+  async function createTutor(name, upi, pin, phone) {
     setSaving(true);
-    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin }).select().single();
+    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone }).select().single();
     if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
-    if (typeof fbq === 'function') { fbq('track', 'CompleteRegistration'); }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     setProfile(res.data);
     setSaving(false);
     return null;
   }
-
   async function recoverAccount(upi, pin) {
     const res = await sb.from('tutors').select('*').eq('upi_id', upi.trim()).eq('recovery_pin', pin.trim()).maybeSingle();
     if (res.error) return 'Something went wrong. Please try again.';
@@ -250,16 +215,19 @@ function App() {
     await loadData(res.data.id);
     return null;
   }
-
+  // CHANGED: addMember now notices when this was the tutor's first-ever
+  // student (members.length was 0 before this add) and, if so, opens
+  // the "add the rest of your class" prompt instead of just closing.
   async function addMember(name, phone, fee, joinedMonth, photo, studentClass, parentName) {
+    const wasFirstStudent = members.length === 0;
     const res = await sb.from('members')
       .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth, photo: photo, student_class: studentClass, parent_name: parentName }).select().single();
     if (res.error) { return res.error.message || 'Could not add student.'; }
     setMembers(members.concat([res.data]));
     setShowAdd(false);
+    if (wasFirstStudent) setJustAddedFirst(res.data.name);
     return null;
   }
-
   async function editMember(memberId, name, phone, fee, photo, studentClass, parentName) {
     const updates = { name: name, phone: phone, fee: Number(fee), student_class: studentClass, parent_name: parentName };
     if (photo !== undefined) updates.photo = photo;
@@ -270,14 +238,12 @@ function App() {
     setEditingMember(null);
     return null;
   }
-
   function buildUpiLink(member, amount) {
     const params = new URLSearchParams({
       pa: profile.upi_id, pn: profile.name, am: String(amount), cu: 'INR', tn: 'Tuition fee'
     });
     return 'upi://pay?' + params.toString();
   }
-
   function sendReminder(member) {
     const outstanding = outstandingMonths(member, payments);
     if (outstanding.length === 0) return;
@@ -285,16 +251,15 @@ function App() {
     const monthsList = outstanding.map(monthLabel).join(', ');
     const upiLink = buildUpiLink(member, total);
     const breakdown = outstanding.length > 1
-      ? ' (' + outstanding.length + ' months \u00d7 Rs.' + member.fee + ')'
+      ? ' (' + outstanding.length + ' months × Rs.' + member.fee + ')'
       : '';
     const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
       "\nTotal due: Rs." + total + breakdown +
-      "\n\nPay here: " + upiLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n\u2014 sent via Tuition Khata";
+      "\n\nPay here: " + upiLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent via Tuition Khata";
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
   }
-
   async function handleMarkPaid(memberId, monthsToMark, file) {
     setSaving(true);
     let screenshot = null;
@@ -312,7 +277,6 @@ function App() {
     setSaving(false);
     setMarkPaidFor(null);
   }
-
   function exportCSV() {
     const rows = [['Student Name', 'Phone', 'Class', 'Parent Name', 'Fee', 'Month', 'Status', 'Paid On']];
     members.forEach(function(m) {
@@ -338,7 +302,6 @@ function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
-
   function handleLogout() {
     if (!window.confirm('Log out of this register on this device? You can log back in anytime with your UPI ID and PIN.')) return;
     localStorage.removeItem('tutor_id');
@@ -347,7 +310,6 @@ function App() {
     setMembers([]);
     setPayments({});
   }
-
   async function updateProfile(name, upi) {
     const res = await sb.from('tutors').update({ name: name, upi_id: upi }).eq('id', tutorId).select().single();
     if (res.error) return res.error.message || 'Could not update profile.';
@@ -355,35 +317,29 @@ function App() {
     setEditingProfile(false);
     return null;
   }
-
   function sendReceipt(member, mk, payment) {
-    const msg = "\u2705 Payment Received\n\nTutor: " + profile.name + "\nStudent: " + member.name + "\nMonth: " + monthLabel(mk) +
+    const msg = "✅ Payment Received\n\nTutor: " + profile.name + "\nStudent: " + member.name + "\nMonth: " + monthLabel(mk) +
       "\nAmount: Rs." + member.fee + "\nReceived on: " + formatDate(payment.paid_at) +
-      "\n\nThank you!\n\u2014 " + profile.name + " (via Tuition Khata)";
+      "\n\nThank you!\n— " + profile.name + " (via Tuition Khata)";
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
   }
-
   async function unmarkPaid(memberId, mk) {
     await sb.from('payments').delete().eq('member_id', memberId).eq('month', mk);
     const next = Object.assign({}, payments);
     delete next[memberId + '_' + mk];
     setPayments(next);
   }
-
   if (loading) {
     return h('div', { style: { backgroundColor: COLORS.paper }, className: 'min-h-screen flex items-center justify-center font-sans' },
-      h('span', { style: { color: COLORS.inkSoft } }, 'Loading\u2026')
+      h('span', { style: { color: COLORS.inkSoft } }, 'Loading…')
     );
   }
-
   const errorBox = error ? h('div', { style: { color: COLORS.redInk }, className: 'text-sm mb-4' }, error) : null;
-
   const emptyState = h('div', { style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'border border-dashed rounded-lg py-10 px-4 text-center mb-5' },
     h('p', { className: 'text-sm' }, 'No entries yet.', h('br'), 'Add your first student to begin your register.')
   );
-
   const filteredMembers = members.filter(function(m) {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -392,7 +348,6 @@ function App() {
       (m.parent_name && m.parent_name.toLowerCase().indexOf(q) >= 0) ||
       (m.phone && m.phone.indexOf(q) >= 0);
   });
-
   const memberCards = h('div', { className: 'space-y-3 mb-5' },
     filteredMembers.map((m) => {
       const outstanding = outstandingMonths(m, payments);
@@ -400,7 +355,6 @@ function App() {
       const totalDue = outstanding.length * Number(m.fee);
       const isExpanded = expandedHistory === m.id;
       const statusLabel = outstanding.length === 0 ? 'All paid' : (outstanding.length + ' month' + (outstanding.length > 1 ? 's' : '') + ' due');
-
       const historyPanel = isExpanded ? h('div', { className: 'mt-3 pt-3 border-t space-y-1.5', style: { borderColor: COLORS.border } },
         allMonths.map(function(mk) {
           const p = payments[m.id + '_' + mk];
@@ -420,7 +374,6 @@ function App() {
           );
         })
       ) : null;
-
       return h('div', { key: m.id, style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border p-4' },
         h('div', { className: 'flex items-start justify-between mb-1' },
           h('div', { className: 'flex items-center gap-3' },
@@ -432,18 +385,18 @@ function App() {
               ),
               h('p', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, '+91 ' + m.phone),
               (m.student_class || m.parent_name) ? h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs mt-0.5' },
-                [m.student_class, m.parent_name].filter(Boolean).join(' \u2022 ')
+                [m.student_class, m.parent_name].filter(Boolean).join(' • ')
               ) : null
             )
           ),
           h(Stamp, { paid: outstanding.length === 0, label: statusLabel })
         ),
         h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2' },
-          '\u20B9' + Number(m.fee).toLocaleString('en-IN'),
+          '₹' + Number(m.fee).toLocaleString('en-IN'),
           h('span', { style: { color: COLORS.inkSoft }, className: 'text-xs font-normal font-sans' }, ' / month')
         ),
         outstanding.length > 0 ? h('p', { style: { color: COLORS.redInk }, className: 'text-xs font-medium mb-3' },
-          'Total due: \u20B9' + totalDue.toLocaleString('en-IN') + (outstanding.length > 1 ? ' (' + outstanding.length + ' months)' : '')
+          'Total due: ₹' + totalDue.toLocaleString('en-IN') + (outstanding.length > 1 ? ' (' + outstanding.length + ' months)' : '')
         ) : h('div', { className: 'mb-3' }),
         outstanding.length > 0
           ? h('div', { className: 'flex gap-2' },
@@ -460,7 +413,6 @@ function App() {
       );
     })
   );
-
   const tableView = h('div', { style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border mb-5 overflow-hidden' },
     h('table', { className: 'w-full text-sm' },
       h('thead', null,
@@ -484,20 +436,18 @@ function App() {
                 )
               )
             ),
-            h('td', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-right px-3 py-2' }, '\u20B9' + Number(m.fee).toLocaleString('en-IN')),
+            h('td', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-right px-3 py-2' }, '₹' + Number(m.fee).toLocaleString('en-IN')),
             h('td', { className: 'text-right px-3 py-2' },
               outstanding.length === 0
                 ? h('span', { style: { color: COLORS.greenInk }, className: 'text-xs font-medium' }, 'All paid')
-                : h('span', { style: { color: COLORS.redInk, fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-xs font-medium' }, '\u20B9' + totalDue.toLocaleString('en-IN'))
+                : h('span', { style: { color: COLORS.redInk, fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-xs font-medium' }, '₹' + totalDue.toLocaleString('en-IN'))
             )
           );
         })
       )
     )
   );
-
   const pendingCount = members.filter(m => outstandingMonths(m, payments).length > 0).length;
-
   const thisMonthKey = monthKey(new Date());
   let collectedThisMonth = 0, pendingThisMonth = 0;
   members.forEach(function(m) {
@@ -513,25 +463,22 @@ function App() {
   },
     h('span', null,
       h('span', { style: { color: COLORS.inkSoft } }, 'This month: '),
-      h('span', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.greenInk } }, '\u20B9' + collectedThisMonth.toLocaleString('en-IN') + ' collected')
+      h('span', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.greenInk } }, '₹' + collectedThisMonth.toLocaleString('en-IN') + ' collected')
     ),
-    pendingThisMonth > 0 ? h('span', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.redInk } }, '\u20B9' + pendingThisMonth.toLocaleString('en-IN') + ' pending') : null
+    pendingThisMonth > 0 ? h('span', { style: { fontFamily: "'IBM Plex Mono', monospace", color: COLORS.redInk } }, '₹' + pendingThisMonth.toLocaleString('en-IN') + ' pending') : null
   ) : null;
-
   const remindAllButton = pendingCount > 0 ? h('button', {
     onClick: () => setRemindQueue(members.filter(m => outstandingMonths(m, payments).length > 0)),
     style: { backgroundColor: COLORS.redInk, color: COLORS.paperLight },
     className: 'w-full rounded-lg py-2.5 text-sm font-medium mb-4'
-  }, '\uD83D\uDCAC Remind All Pending (' + pendingCount + ')') : null;
-
+  }, '💬 Remind All Pending (' + pendingCount + ')') : null;
   const searchBox = members.length > 5 ? h('input', {
     value: searchQuery,
     onChange: e => setSearchQuery(e.target.value),
-    placeholder: 'Search by name, class, or parent\u2026',
+    placeholder: 'Search by name, class, or parent…',
     style: { borderColor: COLORS.border },
     className: 'w-full border rounded-md px-3 py-2 text-sm mb-4 bg-white/60'
   }) : null;
-
   const viewToggle = h('div', { className: 'flex gap-2 mb-4' },
     h('button', {
       onClick: () => setViewMode('cards'),
@@ -542,9 +489,8 @@ function App() {
       onClick: () => setViewMode('table'),
       style: viewMode === 'table' ? { backgroundColor: COLORS.ink, color: COLORS.paperLight } : { color: COLORS.inkSoft, borderColor: COLORS.border },
       className: 'px-3 py-1.5 rounded-md text-xs font-medium' + (viewMode !== 'table' ? ' border' : '')
-    }, 'Table \u2014 all at a glance')
+    }, 'Table — all at a glance')
   );
-
   const mainContent = !profile
     ? h(Onboarding, { onSave: createTutor, onRecover: recoverAccount, saving: saving, colors: COLORS })
     : h(React.Fragment, null,
@@ -558,14 +504,12 @@ function App() {
         ),
         h('button', { onClick: () => setShowAdd(true), style: { borderColor: COLORS.ink, color: COLORS.ink }, className: 'w-full border border-dashed rounded-lg py-3 text-sm font-medium' }, '+ Add Student')
       );
-
   const markPaidMember = markPaidFor ? members.find(x => x.id === markPaidFor) : null;
   const markPaidOutstanding = markPaidMember ? outstandingMonths(markPaidMember, payments) : [];
-
   return h('div', { style: { backgroundColor: COLORS.paper, color: COLORS.ink }, className: 'min-h-screen font-sans' },
     h('div', { className: 'max-w-md mx-auto px-4 pb-24 pt-6' },
       h('div', { className: 'flex items-center gap-2 mb-1' },
-        h('span', { className: 'text-2xl' }, '\uD83D\uDCD6'),
+        h('span', { className: 'text-2xl' }, '📖'),
         h('h1', { style: { fontFamily: "'Arvo', serif" }, className: 'text-2xl font-bold tracking-tight' }, 'Tuition Khata')
       ),
       h('div', { className: 'flex items-center justify-between mb-6 ml-8 relative' },
@@ -575,7 +519,7 @@ function App() {
             onClick: () => setShowMenu(!showMenu),
             style: { color: COLORS.inkSoft, borderColor: COLORS.border },
             className: 'w-8 h-8 rounded-full border flex items-center justify-center text-lg leading-none'
-          }, '\u22EF'),
+          }, '⋯'),
           showMenu ? h(React.Fragment, null,
             h('div', { className: 'fixed inset-0 z-40', onClick: () => setShowMenu(false) }),
             h('div', {
@@ -605,7 +549,7 @@ function App() {
         onClick: handleInstallClick,
         style: { backgroundColor: COLORS.ink, color: COLORS.paperLight },
         className: 'w-full rounded-lg py-2.5 text-sm font-medium mb-5'
-      }, '\uD83D\uDCF2 Install App on this device') : null,
+      }, '📲 Install App on this device') : null,
       mainContent
     ),
     showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
@@ -619,18 +563,51 @@ function App() {
       onConfirm: (monthsToMark, file) => handleMarkPaid(markPaidFor, monthsToMark, file),
       colors: COLORS
     }) : null,
+    // NEW: shown once, right after the tutor's first student is added.
+    justAddedFirst ? h(FirstStudentPromptModal, {
+      studentName: justAddedFirst,
+      onAddAnother: () => { setJustAddedFirst(null); setShowAdd(true); },
+      onLater: () => setJustAddedFirst(null),
+      colors: COLORS
+    }) : null,
     lightbox ? h('div', { className: 'fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50', onClick: () => setLightbox(null) },
       h('img', { src: lightbox, className: 'max-w-full max-h-full rounded-lg' })
     ) : null
   );
 }
-
+// NEW component: the "add the rest of your class" nudge shown once,
+// right after the tutor's very first student is saved. Styled the
+// same way as the other modals (RemindAllModal, ProfileEditModal etc.)
+// so it feels like part of the app, not a popup.
+function FirstStudentPromptModal(props) {
+  const studentName = props.studentName, onAddAnother = props.onAddAnother, onLater = props.onLater, colors = props.colors;
+  return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+      h('div', { className: 'flex items-center justify-between mb-3' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, studentName + ' added'),
+        h('button', { onClick: onLater }, '✕')
+      ),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-5' },
+        'Reminders and fee tracking only work for students you’ve added here — add the rest of your class now so nobody gets missed later.'
+      ),
+      h('button', {
+        onClick: onAddAnother,
+        style: { backgroundColor: colors.ink, color: colors.paperLight },
+        className: 'w-full rounded-md py-3 text-sm font-medium mb-2'
+      }, '+ Add another student →'),
+      h('button', {
+        onClick: onLater,
+        style: { color: colors.inkSoft },
+        className: 'w-full text-xs py-2 hover:underline'
+      }, 'I’ll add more later')
+    )
+  );
+}
 function RemindAllModal(props) {
   const queue = props.queue, onClose = props.onClose, onSend = props.onSend, colors = props.colors;
   const [index, setIndex] = useState(0);
   const done = index >= queue.length;
   const current = !done ? queue[index] : null;
-
   function handleSendAndNext() {
     onSend(current);
     setIndex(index + 1);
@@ -638,16 +615,15 @@ function RemindAllModal(props) {
   function handleSkip() {
     setIndex(index + 1);
   }
-
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, done ? 'All done' : ('Reminder ' + (index + 1) + ' of ' + queue.length)),
-        h('button', { onClick: onClose }, '\u2715')
+        h('button', { onClick: onClose }, '✕')
       ),
       done
         ? h('div', { className: 'text-center py-6' },
-            h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'You\u2019ve gone through everyone with dues pending.'),
+            h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'You’ve gone through everyone with dues pending.'),
             h('button', {
               onClick: onClose,
               style: { backgroundColor: colors.ink, color: colors.paperLight },
@@ -664,7 +640,7 @@ function RemindAllModal(props) {
               onClick: handleSendAndNext,
               style: { backgroundColor: colors.ink, color: colors.paperLight },
               className: 'w-full rounded-md py-3 text-sm font-medium mb-2'
-            }, '\uD83D\uDCAC Open WhatsApp & Next'),
+            }, '💬 Open WhatsApp & Next'),
             h('button', {
               onClick: handleSkip,
               style: { color: colors.inkSoft },
@@ -674,29 +650,30 @@ function RemindAllModal(props) {
     )
   );
 }
-
 function Onboarding(props) {
   const onSave = props.onSave, onRecover = props.onRecover, saving = props.saving, colors = props.colors;
   const [mode, setMode] = useState('new');
   const [name, setName] = useState('');
   const [upi, setUpi] = useState('');
   const [pin, setPin] = useState('');
+  // NEW: the tutor's own WhatsApp number, collected at signup so Neeraj
+  // can check in later if they go quiet after adding only one student.
+  const [phone, setPhone] = useState('');
   const [setupError, setSetupError] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
   const [recoverPin, setRecoverPin] = useState('');
   const [recovering, setRecovering] = useState(false);
   const [recoverError, setRecoverError] = useState('');
   const pinValid = /^\d{4}$/.test(pin);
-  const canSave = name.trim().length > 1 && upi.trim().length > 3 && pinValid;
+  const phoneValid = /^\d{10}$/.test(phone);
+  const canSave = name.trim().length > 1 && upi.trim().length > 3 && pinValid && phoneValid;
   const recoverPinValid = /^\d{4}$/.test(recoverPin);
   const canRecover = recoverUpi.trim().length > 3 && recoverPinValid;
-
   async function handleSave() {
     setSetupError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), pin);
+    const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim());
     if (errMsg) setSetupError(errMsg);
   }
-
   async function handleRecover() {
     setRecovering(true);
     setRecoverError('');
@@ -704,7 +681,6 @@ function Onboarding(props) {
     setRecovering(false);
     if (errMsg) setRecoverError(errMsg);
   }
-
   if (mode === 'recover') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
       h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Recover your register'),
@@ -712,39 +688,49 @@ function Onboarding(props) {
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
       h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your 4-digit PIN'),
-      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '\u2022\u2022\u2022\u2022', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
       recoverError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3 mt-2' }, recoverError) : h('div', { className: 'mb-4' }),
       h('button', {
         disabled: !canRecover || recovering,
         onClick: handleRecover,
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canRecover || recovering) ? 0.5 : 1 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
-      }, recovering ? 'Looking up\u2026' : 'Recover my register'),
+      }, recovering ? 'Looking up…' : 'Recover my register'),
       h('button', { onClick: () => setMode('new'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Back to set up a new register')
     );
   }
-
   return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
     h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Set up your register'),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Used to generate your payment links and reminder messages.'),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-3' }, 'Used to generate your payment links and reminder messages.'),
+    // MOVED (was at the bottom, below the whole form): a returning tutor
+    // opening this on a new device/browser needs to spot this before
+    // they start refilling the form, not after — otherwise they may
+    // end up creating a second, duplicate register by mistake.
+    h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'text-xs hover:underline mb-4' }, 'Already have a register? Recover it'),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
     h('input', { value: name, onChange: e => setName(e.target.value), placeholder: 'e.g. Priya Sharma', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
     h('input', { value: upi, onChange: e => setUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+    // NEW field: tutor's own WhatsApp number.
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
+    h('div', { className: 'flex items-center gap-2 mb-1' },
+      h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
+      h('input', { value: phone, onChange: e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
+    ),
+    (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'So we can check in and help if you ever get stuck — never shared, never spammed.'),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
-    h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '\u2022\u2022\u2022\u2022', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this \u2014 you\u2019ll need it along with your UPI ID to recover your account if you lose access.'),
+    h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this — you’ll need it along with your UPI ID to recover your account if you lose access.'),
     setupError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, setupError) : null,
     h('button', {
       disabled: !canSave || saving,
       onClick: handleSave,
       style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canSave || saving) ? 0.5 : 1 },
       className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
-    }, saving ? 'Saving\u2026' : 'Start my register'),
-    h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Already have a register? Recover it')
+    }, saving ? 'Saving…' : 'Start my register')
   );
 }
-
 function ProfileEditModal(props) {
   const profile = props.profile, onClose = props.onClose, onSave = props.onSave, colors = props.colors;
   const [name, setName] = useState(profile.name);
@@ -752,7 +738,6 @@ function ProfileEditModal(props) {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const canSave = name.trim().length > 1 && upi.trim().length > 3;
-
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
@@ -760,30 +745,28 @@ function ProfileEditModal(props) {
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
-
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit your profile'),
-        h('button', { onClick: onClose }, '\u2715')
+        h('button', { onClick: onClose }, '✕')
       ),
       h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'This name and UPI ID are used on every reminder and receipt you send.'),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
       h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
       h('input', { value: upi, onChange: e => setUpi(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Note: your recovery PIN stays the same \u2014 this only changes what parents see.'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Note: your recovery PIN stays the same — this only changes what parents see.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
       h('button', {
         disabled: !canSave || submitting,
         onClick: handleSubmit,
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canSave && !submitting) ? 1 : 0.5 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
-      }, submitting ? 'Saving\u2026' : 'Save changes')
+      }, submitting ? 'Saving…' : 'Save changes')
     )
   );
 }
-
 function AddMemberModal(props) {
   const onClose = props.onClose, onAdd = props.onAdd, colors = props.colors;
   const [name, setName] = useState('');
@@ -798,12 +781,10 @@ function AddMemberModal(props) {
   const photoInputRef = useRef(null);
   const phoneValid = /^\d{10}$/.test(phone);
   const canAdd = name.trim().length > 1 && phoneValid && Number(fee) > 0;
-
   async function handlePhotoChange(file) {
     if (!file) return;
     try { const compressed = await compressPhoto(file); setPhoto(compressed); } catch (e) {}
   }
-
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
@@ -811,12 +792,11 @@ function AddMemberModal(props) {
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
-
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'New entry'),
-        h('button', { onClick: onClose }, '\u2715')
+        h('button', { onClick: onClose }, '✕')
       ),
       h('div', { className: 'flex justify-center mb-4' },
         h('input', { ref: photoInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handlePhotoChange(e.target.files[0]) }),
@@ -838,22 +818,21 @@ function AddMemberModal(props) {
       h('input', { value: studentClass, onChange: e => setStudentClass(e.target.value), placeholder: 'e.g. Class 8', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's name (optional)"),
       h('input', { value: parentName, onChange: e => setParentName(e.target.value), placeholder: 'e.g. Mrs. Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (\u20B9)'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (₹)'),
       h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), placeholder: 'e.g. 1500', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Student since'),
       h('input', { type: 'month', value: joinedMonth, onChange: e => setJoinedMonth(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Set this to when they actually started \u2014 past months will show as due until you mark them paid.'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Set this to when they actually started — past months will show as due until you mark them paid.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
       h('button', {
         disabled: !canAdd || submitting,
         onClick: handleSubmit,
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canAdd && !submitting) ? 1 : 0.5 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
-      }, submitting ? 'Adding\u2026' : 'Add to register')
+      }, submitting ? 'Adding…' : 'Add to register')
     )
   );
 }
-
 function EditMemberModal(props) {
   const member = props.member, onClose = props.onClose, onSave = props.onSave, colors = props.colors;
   const [name, setName] = useState(member.name);
@@ -867,12 +846,10 @@ function EditMemberModal(props) {
   const photoInputRef = useRef(null);
   const phoneValid = /^\d{10}$/.test(phone);
   const canSave = name.trim().length > 1 && phoneValid && Number(fee) > 0;
-
   async function handlePhotoChange(file) {
     if (!file) return;
     try { const compressed = await compressPhoto(file); setPhoto(compressed); } catch (e) {}
   }
-
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
@@ -880,12 +857,11 @@ function EditMemberModal(props) {
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
-
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit student'),
-        h('button', { onClick: onClose }, '\u2715')
+        h('button', { onClick: onClose }, '✕')
       ),
       h('div', { className: 'flex justify-center mb-4' },
         h('input', { ref: photoInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handlePhotoChange(e.target.files[0]) }),
@@ -907,20 +883,19 @@ function EditMemberModal(props) {
       h('input', { value: studentClass, onChange: e => setStudentClass(e.target.value), placeholder: 'e.g. Class 8', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's name (optional)"),
       h('input', { value: parentName, onChange: e => setParentName(e.target.value), placeholder: 'e.g. Mrs. Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (\u20B9)'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (₹)'),
       h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'This updates their fee going forward \u2014 months already marked paid are not affected.'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'This updates their fee going forward — months already marked paid are not affected.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
       h('button', {
         disabled: !canSave || submitting,
         onClick: handleSubmit,
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canSave && !submitting) ? 1 : 0.5 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
-      }, submitting ? 'Saving\u2026' : 'Save changes')
+      }, submitting ? 'Saving…' : 'Save changes')
     )
   );
 }
-
 function MarkPaidModal(props) {
   const onClose = props.onClose, onConfirm = props.onConfirm, saving = props.saving, colors = props.colors;
   const outstanding = props.outstandingMonths || [];
@@ -928,18 +903,16 @@ function MarkPaidModal(props) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const inputRef = useRef(null);
-
   function toggleMonth(mk) {
     if (selected.indexOf(mk) >= 0) setSelected(selected.filter(x => x !== mk));
     else setSelected(selected.concat([mk]));
   }
   function handleFile(f) { setFile(f); if (f) setPreview(URL.createObjectURL(f)); }
-
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
     h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Mark as paid'),
-        h('button', { onClick: onClose }, '\u2715')
+        h('button', { onClick: onClose }, '✕')
       ),
       h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-2' }, 'Select which month(s) this payment covers:'),
       h('div', { className: 'space-y-1.5 mb-4' },
@@ -967,13 +940,11 @@ function MarkPaidModal(props) {
         onClick: () => onConfirm(selected, file),
         style: { backgroundColor: colors.greenInk, color: colors.paperLight, opacity: (saving || selected.length === 0) ? 0.6 : 1 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
-      }, saving ? 'Saving\u2026' : ('Confirm paid (' + selected.length + ' month' + (selected.length !== 1 ? 's' : '') + ')'))
+      }, saving ? 'Saving…' : ('Confirm paid (' + selected.length + ' month' + (selected.length !== 1 ? 's' : '') + ')'))
     )
   );
 }
-
 ReactDOM.createRoot(document.getElementById('root')).render(h(App));
-
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('sw.js').catch(function() {});
