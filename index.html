@@ -330,8 +330,12 @@ function App() {
     setMembers([]);
     setPayments({});
   }
-  async function updateProfile(name, upi) {
-    const res = await sb.from('tutors').update({ name: name, upi_id: upi }).eq('id', tutorId).select().single();
+  // CHANGED: also saves the WhatsApp number now — this is the only
+  // place a tutor can add or fix it after signup, which matters most
+  // for the tutors who signed up before this field existed and have
+  // never had a way to add one until now.
+  async function updateProfile(name, upi, phone) {
+    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null }).eq('id', tutorId).select().single();
     if (res.error) return res.error.message || 'Could not update profile.';
     setProfile(res.data);
     setEditingProfile(false);
@@ -602,7 +606,11 @@ function App() {
 function FirstStudentPromptModal(props) {
   const studentName = props.studentName, onAddAnother = props.onAddAnother, onLater = props.onLater, colors = props.colors;
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
+    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
+    // window height with its own scrollbar, so a long form like "Add
+    // Student" no longer looks oversized on a big screen.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-3' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, studentName + ' added'),
         h('button', { onClick: onLater }, '✕')
@@ -636,7 +644,11 @@ function RemindAllModal(props) {
     setIndex(index + 1);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
+    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
+    // window height with its own scrollbar, so a long form like "Add
+    // Student" no longer looks oversized on a big screen.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, done ? 'All done' : ('Reminder ' + (index + 1) + ' of ' + queue.length)),
         h('button', { onClick: onClose }, '✕')
@@ -771,7 +783,7 @@ function Onboarding(props) {
   }
   return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
     h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Set up your register'),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-3' }, 'Used to generate your payment links and reminder messages.'),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-3' }, 'For your payment links and reminders.'),
     // MOVED (was at the bottom, below the whole form): a returning tutor
     // opening this on a new device/browser needs to spot this before
     // they start refilling the form, not after — otherwise they may
@@ -805,18 +817,29 @@ function ProfileEditModal(props) {
   const profile = props.profile, onClose = props.onClose, onSave = props.onSave, colors = props.colors;
   const [name, setName] = useState(profile.name);
   const [upi, setUpi] = useState(profile.upi_id);
+  // NEW: lets a tutor add or correct their WhatsApp number after
+  // signup — the only place this is possible other than at signup
+  // itself. Left optional here (unlike at signup) so tutors who
+  // signed up before this field existed can still save a name/UPI
+  // change without being forced to add a phone number in the same step.
+  const [phone, setPhone] = useState(profile.phone_number || '');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
-  const canSave = name.trim().length > 1 && upi.trim().length > 3;
+  const phoneValid = /^\d{10}$/.test(phone);
+  const canSave = name.trim().length > 1 && upi.trim().length > 3 && (phone.length === 0 || phoneValid);
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onSave(name.trim(), upi.trim());
+    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim());
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
+    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
+    // window height with its own scrollbar, so a long form like "Add
+    // Student" no longer looks oversized on a big screen.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit your profile'),
         h('button', { onClick: onClose }, '✕')
@@ -825,8 +848,14 @@ function ProfileEditModal(props) {
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
       h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
-      h('input', { value: upi, onChange: e => setUpi(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Note: your recovery PIN stays the same — this only changes what parents see.'),
+      h('input', { value: upi, onChange: e => setUpi(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
+      h('div', { className: 'flex items-center gap-2 mb-1' },
+        h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
+        h('input', { value: phone, onChange: e => setPhone(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
+      ),
+      (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Used to check in with you and to reset your PIN if you forget it — never shared. Your recovery PIN itself stays the same here.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
       h('button', {
         disabled: !canSave || submitting,
@@ -863,7 +892,11 @@ function AddMemberModal(props) {
     if (errMsg) setLocalError(errMsg);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
+    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
+    // window height with its own scrollbar, so a long form like "Add
+    // Student" no longer looks oversized on a big screen.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'New entry'),
         h('button', { onClick: onClose }, '✕')
@@ -928,7 +961,11 @@ function EditMemberModal(props) {
     if (errMsg) setLocalError(errMsg);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
+    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
+    // window height with its own scrollbar, so a long form like "Add
+    // Student" no longer looks oversized on a big screen.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit student'),
         h('button', { onClick: onClose }, '✕')
@@ -979,7 +1016,11 @@ function MarkPaidModal(props) {
   }
   function handleFile(f) { setFile(f); if (f) setPreview(URL.createObjectURL(f)); }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md rounded-xl p-5' },
+    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
+    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
+    // window height with its own scrollbar, so a long form like "Add
+    // Student" no longer looks oversized on a big screen.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Mark as paid'),
         h('button', { onClick: onClose }, '✕')
