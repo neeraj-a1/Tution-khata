@@ -215,6 +215,26 @@ function App() {
     await loadData(res.data.id);
     return null;
   }
+  // NEW: lets a tutor who forgot their PIN get back in without it,
+  // by proving they know two things they set at signup instead — their
+  // UPI ID and the WhatsApp number they registered. Anyone who signed
+  // up before the phone number field existed won't have one on file,
+  // so this won't find a match for them (nothing we can do about that
+  // without some other way to verify them).
+  async function resetPin(upi, phone, newPin) {
+    const res = await sb.from('tutors')
+      .update({ recovery_pin: newPin })
+      .eq('upi_id', upi.trim())
+      .eq('phone_number', phone.trim())
+      .select()
+      .maybeSingle();
+    if (res.error) return 'Something went wrong. Please try again.';
+    if (!res.data) return 'No matching account found. Double-check your UPI ID and WhatsApp number are exactly right — or if you signed up a while ago, you may not have a WhatsApp number on file yet, in which case this won’t work and you’ll need help resetting it manually.';
+    localStorage.setItem('tutor_id', res.data.id);
+    setTutorId(res.data.id);
+    await loadData(res.data.id);
+    return null;
+  }
   // CHANGED: addMember now notices when this was the tutor's first-ever
   // student (members.length was 0 before this add) and, if so, opens
   // the "add the rest of your class" prompt instead of just closing.
@@ -492,7 +512,7 @@ function App() {
     }, 'Table — all at a glance')
   );
   const mainContent = !profile
-    ? h(Onboarding, { onSave: createTutor, onRecover: recoverAccount, saving: saving, colors: COLORS })
+    ? h(Onboarding, { onSave: createTutor, onRecover: recoverAccount, onResetPin: resetPin, saving: saving, colors: COLORS })
     : h(React.Fragment, null,
         errorBox,
         members.length === 0 ? emptyState : h(React.Fragment, null,
@@ -651,7 +671,7 @@ function RemindAllModal(props) {
   );
 }
 function Onboarding(props) {
-  const onSave = props.onSave, onRecover = props.onRecover, saving = props.saving, colors = props.colors;
+  const onSave = props.onSave, onRecover = props.onRecover, onResetPin = props.onResetPin, saving = props.saving, colors = props.colors;
   const [mode, setMode] = useState('new');
   const [name, setName] = useState('');
   const [upi, setUpi] = useState('');
@@ -664,11 +684,24 @@ function Onboarding(props) {
   const [recoverPin, setRecoverPin] = useState('');
   const [recovering, setRecovering] = useState(false);
   const [recoverError, setRecoverError] = useState('');
+  // NEW: "forgot PIN" state — reset uses UPI ID + registered WhatsApp
+  // number as proof of identity instead of the PIN itself, since we
+  // have no automated way to send a verification code.
+  const [forgotUpi, setForgotUpi] = useState('');
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [newPin2, setNewPin2] = useState('');
+  const [resettingPin, setResettingPin] = useState(false);
+  const [resetPinError, setResetPinError] = useState('');
   const pinValid = /^\d{4}$/.test(pin);
   const phoneValid = /^\d{10}$/.test(phone);
   const canSave = name.trim().length > 1 && upi.trim().length > 3 && pinValid && phoneValid;
   const recoverPinValid = /^\d{4}$/.test(recoverPin);
   const canRecover = recoverUpi.trim().length > 3 && recoverPinValid;
+  const forgotPhoneValid = /^\d{10}$/.test(forgotPhone);
+  const newPinValid = /^\d{4}$/.test(newPin);
+  const newPinsMatch = newPinValid && newPin === newPin2;
+  const canResetPin = forgotUpi.trim().length > 3 && forgotPhoneValid && newPinsMatch;
   async function handleSave() {
     setSetupError('');
     const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim());
@@ -680,6 +713,39 @@ function Onboarding(props) {
     const errMsg = await onRecover(recoverUpi, recoverPin);
     setRecovering(false);
     if (errMsg) setRecoverError(errMsg);
+  }
+  async function handleResetPin() {
+    setResettingPin(true);
+    setResetPinError('');
+    const errMsg = await onResetPin(forgotUpi, forgotPhone, newPin);
+    setResettingPin(false);
+    if (errMsg) setResetPinError(errMsg);
+  }
+  if (mode === 'forgot') {
+    return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
+      h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Reset your PIN'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter your UPI ID and the WhatsApp number you signed up with — if they match, you can set a new PIN right away.'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
+      h('input', { value: forgotUpi, onChange: e => setForgotUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
+      h('div', { className: 'flex items-center gap-2 mb-3' },
+        h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
+        h('input', { value: forgotPhone, onChange: e => setForgotPhone(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
+      ),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'New 4-digit PIN'),
+      h('input', { value: newPin, onChange: e => setNewPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60 tracking-widest' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Confirm new PIN'),
+      h('input', { value: newPin2, onChange: e => setNewPin2(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+      (newPin2.length > 0 && !newPinsMatch) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'PINs don’t match.') : h('div', { className: 'mb-2' }),
+      resetPinError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, resetPinError) : null,
+      h('button', {
+        disabled: !canResetPin || resettingPin,
+        onClick: handleResetPin,
+        style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canResetPin || resettingPin) ? 0.5 : 1 },
+        className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
+      }, resettingPin ? 'Checking…' : 'Set new PIN and log in'),
+      h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Back')
+    );
   }
   if (mode === 'recover') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
@@ -694,8 +760,12 @@ function Onboarding(props) {
         disabled: !canRecover || recovering,
         onClick: handleRecover,
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (!canRecover || recovering) ? 0.5 : 1 },
-        className: 'w-full rounded-md py-2.5 text-sm font-medium mb-3'
+        className: 'w-full rounded-md py-2.5 text-sm font-medium mb-2'
       }, recovering ? 'Looking up…' : 'Recover my register'),
+      // NEW: self-serve PIN reset for anyone who has a WhatsApp number
+      // on file (see the Reset your PIN screen for why that's the
+      // second factor used here instead of the PIN itself).
+      h('button', { onClick: () => setMode('forgot'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline mb-3' }, 'Forgot your PIN?'),
       h('button', { onClick: () => setMode('new'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Back to set up a new register')
     );
   }
