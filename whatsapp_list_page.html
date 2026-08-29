@@ -28,7 +28,7 @@
 </head>
 <body>
   <h1>Today's activation list</h1>
-  <div class="meta">Tutors signed up 1+ day ago, still at 1 or fewer students</div>
+  <div class="meta" id="modeNote">Tutors signed up 1+ day ago, still at 1 or fewer students</div>
 
   <h2 id="toMessageHeading">To message</h2>
   <div id="toMessageList" class="loading">Loading…</div>
@@ -56,6 +56,18 @@
     const FUNCTION_URL = 'https://xgsbjyqdkeaeihzhadgs.supabase.co/functions/v1/daily-whatsapp-list';
     const ACCESS_KEY = 'neeraj-tk-9x7q2m4p8k';
     const PUBLISHABLE_KEY = 'sb_publishable_vP7cJ9AA9Ubf5dVu_WxEkg_fuymQNU5';
+
+    // Add ?all=1 to THIS page's own URL (e.g. .../whatsapp_list_page.html?all=1)
+    // to see everyone currently stuck at 0-1 students, regardless of how
+    // recently they signed up — a one-time way to catch up on everyone
+    // right now. Leave it off (the plain bookmarked link) for normal daily
+    // use, which only shows people who've had at least a day to finish on
+    // their own first.
+    const showAll = new URLSearchParams(window.location.search).get('all') === '1';
+    if (showAll) {
+      document.getElementById('modeNote').textContent =
+        'Showing EVERYONE currently at 1 or fewer students, regardless of signup date (one-time catch-up mode)';
+    }
 
     function authHeaders() {
       return { apikey: PUBLISHABLE_KEY, Authorization: 'Bearer ' + PUBLISHABLE_KEY };
@@ -135,9 +147,10 @@
 
     async function loadList() {
       try {
-        const res = await fetch(FUNCTION_URL + '?key=' + encodeURIComponent(ACCESS_KEY), {
-          headers: authHeaders(),
-        });
+        const res = await fetch(
+          FUNCTION_URL + '?key=' + encodeURIComponent(ACCESS_KEY) + (showAll ? '&all=1' : ''),
+          { headers: authHeaders() }
+        );
         const data = await res.json();
         if (!res.ok) {
           document.getElementById('toMessageList').innerHTML =
