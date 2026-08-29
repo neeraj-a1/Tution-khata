@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tuition Khata — daily WhatsApp list</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #f3f1ea; margin: 0; padding: 20px; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    h2 { font-size: 15px; color: #555; margin-top: 32px; }
+    .empty, .loading, .error { color: #888; padding: 16px 0; }
+    .error { color: #b3261e; }
+    .row {
+      display: flex; justify-content: space-between; align-items: center;
+      background: white; border: 1px solid #ddd; border-radius: 10px;
+      padding: 14px; margin-bottom: 10px; gap: 10px;
+    }
+    .name { font-weight: 600; }
+    .meta { font-size: 13px; color: #777; margin-top: 2px; }
+    .btn {
+      background: #1e3a5f; color: white; text-decoration: none; border: none;
+      padding: 10px 14px; border-radius: 8px; font-size: 14px; white-space: nowrap;
+      cursor: pointer; font-family: inherit;
+    }
+    .btn.secondary { background: #999; }
+    .btn:disabled { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <h1>Today's activation list</h1>
+  <div class="meta">Tutors signed up 3+ days ago, still at 1 or fewer students</div>
+
+  <h2 id="toMessageHeading">To message</h2>
+  <div id="toMessageList" class="loading">Loading…</div>
+
+  <h2 id="alreadyMessagedHeading">Already messaged</h2>
+  <div id="alreadyMessagedList"></div>
+
+  <script>
+    // ============================================================
+    // SETUP — fill these three in before using this page:
+    //
+    // 1. FUNCTION_URL — your Edge Function's URL. Find it on the
+    //    function's page in the Supabase dashboard, right under its
+    //    name (looks like https://<project-ref>.supabase.co/functions/v1/daily-whatsapp-list)
+    //
+    // 2. ACCESS_KEY — must be the exact same value you set as the
+    //    ACCESS_KEY secret in Supabase (Edge Functions → Secrets).
+    //
+    // 3. PUBLISHABLE_KEY — copy this from the function's Settings
+    //    page in the Supabase dashboard, under "Invoke function" —
+    //    click "Show anon key" (or "Show publishable key") and copy
+    //    the value shown. This is NOT a secret — it's the same key
+    //    your live app already uses in the browser, safe to put here.
+    // ============================================================
+    const FUNCTION_URL = 'https://xgsbjyqdkeaeihzhadgs.supabase.co/functions/v1/daily-whatsapp-list';
+    const ACCESS_KEY = 'neeraj-tk-9x7q2m4p8k';
+    const PUBLISHABLE_KEY = 'sb_publishable_vP7cJ9AA9Ubf5dVu_WxEkg_fuymQNU5';
+
+    function authHeaders() {
+      return { apikey: PUBLISHABLE_KEY, Authorization: 'Bearer ' + PUBLISHABLE_KEY };
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function rowHtml(t, showPrimaryButton) {
+      const name = escapeHtml(t.name);
+      const contactedNote = t.lastContactedAt
+        ? '<div class="meta">Messaged ' + escapeHtml(new Date(t.lastContactedAt).toLocaleDateString('en-IN')) + '</div>'
+        : '';
+      const btnClass = showPrimaryButton ? 'btn' : 'btn secondary';
+      const btnLabel = showPrimaryButton ? 'Message on WhatsApp →' : 'Message again →';
+      return (
+        '<div class="row">' +
+          '<div>' +
+            '<div class="name">' + name + '</div>' +
+            '<div class="meta">Signed up ' + t.days + ' day' + (t.days === 1 ? '' : 's') +
+              ' ago · ' + t.totalStudents + ' student' + (t.totalStudents === 1 ? '' : 's') + ' added</div>' +
+            contactedNote +
+          '</div>' +
+          '<button type="button" class="' + btnClass + '" data-id="' + t.id + '" data-students="' + t.totalStudents + '">' + btnLabel + '</button>' +
+        '</div>'
+      );
+    }
+
+    async function messageTutor(id, totalStudents, button) {
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Opening…';
+      try {
+        const res = await fetch(
+          FUNCTION_URL + '?key=' + encodeURIComponent(ACCESS_KEY) + '&action=contact&id=' + encodeURIComponent(id) + '&students=' + encodeURIComponent(totalStudents),
+          { headers: authHeaders() }
+        );
+        const data = await res.json();
+        if (!res.ok || !data.waLink) {
+          alert('Could not open WhatsApp: ' + (data.error || 'unknown error'));
+          button.disabled = false;
+          button.textContent = originalLabel;
+          return;
+        }
+        // Opens in a new tab so this list page stays open — you can
+        // come back and message the next person without reloading.
+        window.open(data.waLink, '_blank');
+        await loadList();
+      } catch (err) {
+        alert('Could not reach the server: ' + err.message);
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    }
+
+    function render(data) {
+      const toMessageEl = document.getElementById('toMessageList');
+      const alreadyEl = document.getElementById('alreadyMessagedList');
+      document.getElementById('toMessageHeading').textContent = 'To message (' + data.toMessage.length + ')';
+      document.getElementById('alreadyMessagedHeading').textContent = 'Already messaged (' + data.alreadyMessaged.length + ')';
+
+      toMessageEl.innerHTML = data.toMessage.length
+        ? data.toMessage.map((t) => rowHtml(t, true)).join('')
+        : '<div class="empty">Nobody new to message today.</div>';
+
+      alreadyEl.innerHTML = data.alreadyMessaged.length
+        ? data.alreadyMessaged.map((t) => rowHtml(t, false)).join('')
+        : '<div class="empty">Nobody yet.</div>';
+
+      document.querySelectorAll('button[data-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          messageTutor(btn.getAttribute('data-id'), Number(btn.getAttribute('data-students')), btn);
+        });
+      });
+    }
+
+    async function loadList() {
+      try {
+        const res = await fetch(FUNCTION_URL + '?key=' + encodeURIComponent(ACCESS_KEY), {
+          headers: authHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          document.getElementById('toMessageList').innerHTML =
+            '<div class="error">Could not load the list: ' + escapeHtml(data.error || res.status) + '</div>';
+          document.getElementById('alreadyMessagedList').innerHTML = '';
+          return;
+        }
+        render(data);
+      } catch (err) {
+        document.getElementById('toMessageList').innerHTML =
+          '<div class="error">Could not reach the server: ' + escapeHtml(err.message) + '</div>';
+        document.getElementById('alreadyMessagedList').innerHTML = '';
+      }
+    }
+
+    loadList();
+  </script>
+</body>
+</html>
