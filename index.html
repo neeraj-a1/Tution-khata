@@ -205,10 +205,13 @@ function App() {
   }
   // CHANGED: createTutor now also takes the tutor's own WhatsApp number
   // and saves it to the new phone_number column, so Neeraj can check in
-  // with tutors who sign up and then go quiet.
-  async function createTutor(name, upi, pin, phone) {
+  // with tutors who sign up and then go quiet. NEW: also takes an
+  // optional email, as a second, non-WhatsApp way to reach someone —
+  // WhatsApp outreach was getting the sender account restricted, so
+  // email is a lower-risk backup channel going forward.
+  async function createTutor(name, upi, pin, phone, email) {
     setSaving(true);
-    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone }).select().single();
+    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null }).select().single();
     if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
@@ -216,30 +219,41 @@ function App() {
     setSaving(false);
     return null;
   }
-  async function recoverAccount(upi, pin) {
-    const res = await sb.from('tutors').select('*').eq('upi_id', upi.trim()).eq('recovery_pin', pin.trim()).maybeSingle();
+  // CHANGED: UPI ID is now optional at signup, so it can no longer be
+  // trusted as a reliable match on its own (many tutors will share a
+  // blank UPI ID). "identifier" now accepts either a UPI ID or a
+  // WhatsApp number — whichever the tutor actually has on file matches.
+  // Existing tutors who set a UPI ID before this change still recover
+  // exactly as before; nothing breaks for them.
+  async function recoverAccount(identifier, pin) {
+    const val = identifier.trim();
+    const res = await sb.from('tutors')
+      .select('*')
+      .or('upi_id.eq.' + val + ',phone_number.eq.' + val)
+      .eq('recovery_pin', pin.trim())
+      .maybeSingle();
     if (res.error) return 'Something went wrong. Please try again.';
-    if (!res.data) return 'No matching account found. Check your UPI ID and PIN are exactly right.';
+    if (!res.data) return 'No matching account found. Check your UPI ID (or WhatsApp number) and PIN are exactly right.';
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     await loadData(res.data.id);
     return null;
   }
-  // NEW: lets a tutor who forgot their PIN get back in without it,
-  // by proving they know two things they set at signup instead — their
-  // UPI ID and the WhatsApp number they registered. Anyone who signed
-  // up before the phone number field existed won't have one on file,
-  // so this won't find a match for them (nothing we can do about that
-  // without some other way to verify them).
-  async function resetPin(upi, phone, newPin) {
+  // NEW: lets a tutor who forgot their PIN get back in without it, by
+  // proving they know two things they set at signup instead — their
+  // name and their registered WhatsApp number. (CHANGED from UPI ID +
+  // phone to name + phone, since UPI ID is no longer guaranteed to
+  // exist.) Anyone who signed up before the phone number field existed
+  // won't have one on file, so this won't find a match for them.
+  async function resetPin(name, phone, newPin) {
     const res = await sb.from('tutors')
       .update({ recovery_pin: newPin })
-      .eq('upi_id', upi.trim())
+      .ilike('name', name.trim())
       .eq('phone_number', phone.trim())
       .select()
       .maybeSingle();
     if (res.error) return 'Something went wrong. Please try again.';
-    if (!res.data) return 'No matching account found. Double-check your UPI ID and WhatsApp number are exactly right — or if you signed up a while ago, you may not have a WhatsApp number on file yet, in which case this won’t work and you’ll need help resetting it manually.';
+    if (!res.data) return 'No matching account found. Double-check your name and WhatsApp number are exactly right — or if you signed up a while ago, you may not have a WhatsApp number on file yet, in which case this won’t work and you’ll need help resetting it manually.';
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     await loadData(res.data.id);
@@ -275,6 +289,13 @@ function App() {
     return 'upi://pay?' + params.toString();
   }
   function sendReminder(member) {
+    // NEW: UPI ID is now optional at signup, so it may be missing here.
+    // Without it, buildUpiLink() would produce a broken payment link —
+    // catch that before opening WhatsApp with something unusable.
+    if (!profile.upi_id || profile.upi_id.trim().length === 0) {
+      alert('Add your UPI ID first (tap Edit Profile) so this reminder includes a working payment link.');
+      return;
+    }
     const outstanding = outstandingMonths(member, payments);
     if (outstanding.length === 0) return;
     const total = outstanding.length * Number(member.fee);
@@ -343,9 +364,11 @@ function App() {
   // CHANGED: also saves the WhatsApp number now — this is the only
   // place a tutor can add or fix it after signup, which matters most
   // for the tutors who signed up before this field existed and have
-  // never had a way to add one until now.
-  async function updateProfile(name, upi, phone) {
-    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null }).eq('id', tutorId).select().single();
+  // never had a way to add one until now. NEW: also saves an optional
+  // email, so existing tutors can add one even though signup didn't
+  // originally ask for it.
+  async function updateProfile(name, upi, phone, email) {
+    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null, email: email ? email : null }).eq('id', tutorId).select().single();
     if (res.error) return res.error.message || 'Could not update profile.';
     setProfile(res.data);
     setEditingProfile(false);
@@ -586,7 +609,11 @@ function App() {
       }, '📲 Install App on this device') : null,
       mainContent
     ),
-    showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS }) : null,
+    // NEW: defaultFee passes along the most recently added student's
+    // fee, so AddMemberModal can pre-fill it — most tutors charge the
+    // same or similar fee across a class, so this saves re-typing it
+    // for every single student.
+    showAdd ? h(AddMemberModal, { onClose: () => setShowAdd(false), onAdd: addMember, colors: COLORS, defaultFee: members.length ? String(members[members.length - 1].fee) : '' }) : null,
     editingMember ? h(EditMemberModal, { member: editingMember, onClose: () => setEditingMember(null), onSave: editMember, colors: COLORS }) : null,
     remindQueue ? h(RemindAllModal, { queue: remindQueue, onClose: () => setRemindQueue(null), onSend: sendReminder, colors: COLORS }) : null,
     editingProfile ? h(ProfileEditModal, { profile: profile, onClose: () => setEditingProfile(false), onSave: updateProfile, colors: COLORS }) : null,
@@ -701,6 +728,8 @@ function Onboarding(props) {
   // NEW: the tutor's own WhatsApp number, collected at signup so Neeraj
   // can check in later if they go quiet after adding only one student.
   const [phone, setPhone] = useState('');
+  // NEW: optional email — a second, non-WhatsApp way to reach someone.
+  const [email, setEmail] = useState('');
   const [setupError, setSetupError] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
   const [recoverPin, setRecoverPin] = useState('');
@@ -717,16 +746,31 @@ function Onboarding(props) {
   const [resetPinError, setResetPinError] = useState('');
   const pinValid = /^\d{4}$/.test(pin);
   const phoneValid = /^\d{10}$/.test(phone);
-  const canSave = name.trim().length > 1 && upi.trim().length > 3 && pinValid && phoneValid;
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // CHANGED: UPI ID is no longer required to sign up — it's only needed
+  // once a tutor actually sends a payment reminder (sendReminder checks
+  // for it then, and prompts them to add it via Edit Profile if it's
+  // still missing). Signing up now only needs name, PIN, and phone.
+  // Email is optional too, but if they do type one, it has to look
+  // like a real email before it's accepted.
+  const canSave = name.trim().length > 1 && pinValid && phoneValid && (email.length === 0 || emailValid);
   const recoverPinValid = /^\d{4}$/.test(recoverPin);
+  // CHANGED: since UPI ID can now be blank for many tutors, matching on
+  // it alone risks matching the wrong (or multiple) blank-UPI accounts.
+  // recoverUpi is now a flexible "UPI ID or WhatsApp number" field —
+  // recoverAccount() matches whichever one this actually is.
   const canRecover = recoverUpi.trim().length > 3 && recoverPinValid;
   const forgotPhoneValid = /^\d{10}$/.test(forgotPhone);
   const newPinValid = /^\d{4}$/.test(newPin);
   const newPinsMatch = newPinValid && newPin === newPin2;
-  const canResetPin = forgotUpi.trim().length > 3 && forgotPhoneValid && newPinsMatch;
+  // CHANGED: Forgot PIN's second factor (paired with phone) is now the
+  // tutor's name instead of UPI ID, since UPI ID is no longer guaranteed
+  // to exist. forgotUpi/setForgotUpi are reused here as the name field
+  // to keep this diff small — see the label text below.
+  const canResetPin = forgotUpi.trim().length > 1 && forgotPhoneValid && newPinsMatch;
   async function handleSave() {
     setSetupError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim());
+    const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim(), email.trim());
     if (errMsg) setSetupError(errMsg);
   }
   async function handleRecover() {
@@ -746,9 +790,9 @@ function Onboarding(props) {
   if (mode === 'forgot') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
       h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Reset your PIN'),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter your UPI ID and the WhatsApp number you signed up with — if they match, you can set a new PIN right away.'),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
-      h('input', { value: forgotUpi, onChange: e => setForgotUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter your name and the WhatsApp number you signed up with — if they match, you can set a new PIN right away.'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name (as you signed up with)'),
+      h('input', { value: forgotUpi, onChange: e => setForgotUpi(e.target.value), placeholder: 'e.g. Priya Sharma', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
       h('div', { className: 'flex items-center gap-2 mb-3' },
         h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
@@ -772,9 +816,9 @@ function Onboarding(props) {
   if (mode === 'recover') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
       h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Recover your register'),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter the UPI ID and 4-digit PIN you set up with.'),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
-      h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter your UPI ID (or your WhatsApp number, if you didn’t set a UPI ID) and your 4-digit PIN.'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID or WhatsApp number'),
+      h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank or 9876543210', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your 4-digit PIN'),
       h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
       recoverError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3 mt-2' }, recoverError) : h('div', { className: 'mb-4' }),
@@ -801,7 +845,7 @@ function Onboarding(props) {
     h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'text-xs hover:underline mb-4' }, 'Already have a register? Recover it'),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
     h('input', { value: name, onChange: e => setName(e.target.value), placeholder: 'e.g. Priya Sharma', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID (optional — add it before your first reminder)'),
     h('input', { value: upi, onChange: e => setUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
     // NEW field: tutor's own WhatsApp number.
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
@@ -811,9 +855,12 @@ function Onboarding(props) {
     ),
     (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
     h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'For check-ins only — never shared, never spammed.'),
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your email (optional)'),
+    h('input', { value: email, onChange: e => setEmail(e.target.value), placeholder: 'e.g. priya@gmail.com', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
+    (email.length > 0 && !emailValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid email address.') : h('div', { className: 'mb-2' }),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
     h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this — you’ll need it along with your UPI ID to recover your account if you lose access.'),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this — you’ll need it along with your UPI ID (or WhatsApp number) to recover your account if you lose access.'),
     setupError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, setupError) : null,
     h('button', {
       disabled: !canSave || saving,
@@ -833,14 +880,22 @@ function ProfileEditModal(props) {
   // signed up before this field existed can still save a name/UPI
   // change without being forced to add a phone number in the same step.
   const [phone, setPhone] = useState(profile.phone_number || '');
+  // NEW: lets a tutor add an email even though signup didn't originally
+  // ask for one — a second, non-WhatsApp way to reach them.
+  const [email, setEmail] = useState(profile.email || '');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const phoneValid = /^\d{10}$/.test(phone);
-  const canSave = name.trim().length > 1 && upi.trim().length > 3 && (phone.length === 0 || phoneValid);
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // CHANGED: UPI ID no longer blocks saving other profile changes — a
+  // tutor can fix their name or phone number without also being forced
+  // to add UPI right then. sendReminder() checks for UPI separately,
+  // when it's actually needed.
+  const canSave = name.trim().length > 1 && (phone.length === 0 || phoneValid) && (email.length === 0 || emailValid);
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim());
+    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim(), email.trim());
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -857,7 +912,7 @@ function ProfileEditModal(props) {
       h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'This name and UPI ID are used on every reminder and receipt you send.'),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
       h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID (needed before you can send a reminder)'),
       h('input', { value: upi, onChange: e => setUpi(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
       h('div', { className: 'flex items-center gap-2 mb-1' },
@@ -866,6 +921,10 @@ function ProfileEditModal(props) {
       ),
       (phone.length > 0 && !phoneValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Used to check in with you and to reset your PIN if you forget it — never shared. Your recovery PIN itself stays the same here.'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your email (optional)'),
+      h('input', { value: email, onChange: e => setEmail(e.target.value), placeholder: 'e.g. priya@gmail.com', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
+      (email.length > 0 && !emailValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid email address.') : h('div', { className: 'mb-2' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'A second way for us to reach you if WhatsApp check-ins aren\'t getting through — never shared.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
       h('button', {
         disabled: !canSave || submitting,
@@ -880,7 +939,10 @@ function AddMemberModal(props) {
   const onClose = props.onClose, onAdd = props.onAdd, colors = props.colors;
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [fee, setFee] = useState('');
+  // NEW: pre-filled with the last student's fee (if any) instead of
+  // blank, so adding the rest of a class is usually one tap, not a
+  // typed number each time. Still fully editable per student.
+  const [fee, setFee] = useState(props.defaultFee || '');
   const [joinedMonth, setJoinedMonth] = useState(monthKey(new Date()));
   const [photo, setPhoto] = useState(null);
   const [studentClass, setStudentClass] = useState('');
