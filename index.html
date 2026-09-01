@@ -620,7 +620,7 @@ function App() {
       },
         h('span', { className: 'text-sm leading-none mt-0.5' }, '🔒'),
         h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs leading-relaxed' },
-          'We never ask for your UPI PIN, bank OTP, or card details — not here, not on a call, not on WhatsApp. The 4-digit PIN below is only to log back into your own fee register on this app.'
+          'We never ask for your UPI PIN, bank OTP, or card details — on a call, on WhatsApp, or anywhere else. The 4-digit PIN below is only to log back into your own fee register on this app.'
         )
       ) : null,
       mainContent
@@ -876,7 +876,11 @@ function Onboarding(props) {
     (email.length > 0 && !emailValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid email address.') : h('div', { className: 'mb-2' }),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
     h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Remember this — you’ll need it along with your UPI ID (or WhatsApp number) to recover your account if you lose access.'),
+    // CHANGED: shortened further, but kept "along with your UPI ID or
+    // WhatsApp number" — dropping that would let someone think the PIN
+    // alone is enough to log back in later, which isn't true (Recover
+    // needs both) and could lock them out for real.
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Save this PIN — you will need it along with your UPI ID or WhatsApp number to log back in.'),
     setupError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, setupError) : null,
     h('button', {
       disabled: !canSave || saving,
