@@ -607,6 +607,22 @@ function App() {
         style: { backgroundColor: COLORS.ink, color: COLORS.paperLight },
         className: 'w-full rounded-lg py-2.5 text-sm font-medium mb-5'
       }, '📲 Install App on this device') : null,
+      // NEW: shown only before signup/login (profile is null then) — a
+      // short, honest trust note addressing the exact worry a new
+      // visitor is likely to have (is this a scam?). Placed above the
+      // form itself, so it's the first thing read, not the last. It
+      // also clarifies the "4-digit PIN" field further down isn't a
+      // UPI PIN, since both are on screen together and could otherwise
+      // read as contradictory.
+      !profile ? h('div', {
+        style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border },
+        className: 'rounded-lg border px-3 py-2.5 mb-4 flex items-start gap-2'
+      },
+        h('span', { className: 'text-sm leading-none mt-0.5' }, '🔒'),
+        h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs leading-relaxed' },
+          'We never ask for your UPI PIN, bank OTP, or card details — not here, not on a call, not on WhatsApp. The 4-digit PIN below is only to log back into your own fee register on this app.'
+        )
+      ) : null,
       mainContent
     ),
     // NEW: defaultFee passes along the most recently added student's
