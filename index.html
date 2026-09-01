@@ -174,6 +174,19 @@ function App() {
     if (savedId) { setTutorId(savedId); loadData(savedId); }
     else { setLoading(false); }
   }, []);
+  // NEW: silently captures which link brought this visitor here, e.g. a
+  // link ending in ?src=fb_delhi_home_tutors or ?src=fb_ad. Saved to
+  // localStorage (not just read once) so it survives someone browsing
+  // around for a few minutes before actually signing up. Nothing shown
+  // on screen, no extra field for the visitor to fill in — this is only
+  // so Neeraj can later see which group or channel each signup actually
+  // came from.
+  useEffect(() => {
+    try {
+      const src = new URLSearchParams(window.location.search).get('src');
+      if (src) localStorage.setItem('signup_source', src.slice(0, 60));
+    } catch (e) {}
+  }, []);
   async function loadData(id) {
     setLoading(true);
     // NEW: quietly records that this tutor's dashboard just loaded —
@@ -211,7 +224,14 @@ function App() {
   // email is a lower-risk backup channel going forward.
   async function createTutor(name, upi, pin, phone, email) {
     setSaving(true);
-    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null }).select().single();
+    // NEW: attaches whichever source link this visitor arrived on (set
+    // by the useEffect above), so signups can later be grouped by which
+    // Facebook group / ad / post actually brought them in. null for a
+    // plain, un-tagged visit — most existing links still work exactly
+    // as before.
+    let signupSource = null;
+    try { signupSource = localStorage.getItem('signup_source') || null; } catch (e) {}
+    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null, signup_source: signupSource }).select().single();
     if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
@@ -737,7 +757,14 @@ function RemindAllModal(props) {
 }
 function Onboarding(props) {
   const onSave = props.onSave, onRecover = props.onRecover, onResetPin = props.onResetPin, saving = props.saving, colors = props.colors;
-  const [mode, setMode] = useState('new');
+  // CHANGED: starts on 'gate' instead of 'new' — a one-tap "is this you?"
+  // screen shown before the signup form itself. A visitor who taps "No"
+  // never sees (or fills in) the form at all; a returning tutor can skip
+  // straight past it via "Already have a register? Recover it", which is
+  // also on the gate screen. This does not lengthen the form for anyone
+  // who actually is a tutor — if anything it's one tap faster for anyone
+  // who taps "No", since they never see the form's fields at all.
+  const [mode, setMode] = useState('gate');
   const [name, setName] = useState('');
   const [upi, setUpi] = useState('');
   const [pin, setPin] = useState('');
@@ -802,6 +829,35 @@ function Onboarding(props) {
     const errMsg = await onResetPin(forgotUpi, forgotPhone, newPin);
     setResettingPin(false);
     if (errMsg) setResetPinError(errMsg);
+  }
+  // NEW: the one-tap qualifying gate, shown first. Filters out the
+  // "signed up but was never actually a tutor" cases at the door,
+  // instead of after they've filled in name/phone/PIN.
+  if (mode === 'gate') {
+    return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
+      h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Quick check before you start'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-5' }, 'This app is built for home tutors who teach students directly and collect their own fees. Is that you?'),
+      h('button', {
+        onClick: () => setMode('new'),
+        style: { backgroundColor: colors.ink, color: colors.paperLight },
+        className: 'w-full rounded-md py-2.5 text-sm font-medium mb-2'
+      }, 'Yes, I’m a home tutor'),
+      h('button', {
+        onClick: () => setMode('declined'),
+        style: { borderColor: colors.border, color: colors.inkSoft },
+        className: 'w-full border rounded-md py-2.5 text-sm font-medium mb-4'
+      }, 'No, not a tutor'),
+      h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Already have a register? Recover it')
+    );
+  }
+  // NEW: a polite, non-dead-end landing spot for anyone who taps "No"
+  // above, instead of silently doing nothing.
+  if (mode === 'declined') {
+    return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
+      h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Thanks for checking us out'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Tuition Khata is built only for home tutors tracking their own students’ fees, so it won’t be useful for you right now.'),
+      h('button', { onClick: () => setMode('gate'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Go back')
+    );
   }
   if (mode === 'forgot') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
