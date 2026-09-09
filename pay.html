@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1E2A3A">
 <!-- Same QR library as the main app (index.html) — draws the QR code
      locally in the browser, nothing sent to any outside service. -->
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -31,7 +31,7 @@
   }
   h1 { font-family: 'Arvo', serif; font-size: 18px; margin: 0 0 4px; }
   .sub { color: var(--ink-soft); font-size: 13px; margin: 0 0 20px; }
-  canvas { border: 1px solid var(--border); border-radius: 12px; margin: 0 auto; display: block; }
+  #qr { border: 1px solid var(--border); border-radius: 12px; margin: 0 auto; width: 220px; height: 220px; }
   .amount { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 600; margin: 14px 0 2px; }
   .amount-note { color: var(--ink-soft); font-size: 12px; margin: 0 0 18px; }
   .pay-btn {
@@ -91,7 +91,7 @@
   var html = '';
   html += '<h1>Pay ' + escapeHtml(name) + '</h1>';
   html += '<p class="sub">via UPI — Tuition Khata</p>';
-  html += '<canvas id="qr"></canvas>';
+  html += '<div id="qr"></div>';
   html += '<p class="amount">₹' + escapeHtml(Number(amount).toLocaleString('en-IN')) + '</p>';
   html += '<p class="amount-note">Scan with any UPI app (Google Pay, PhonePe, Paytm, or your bank app) to pay this amount.</p>';
   html += '<a class="pay-btn" href="' + upiLink.replace(/"/g, '&quot;') + '">Open my UPI app to pay</a>';
@@ -108,8 +108,11 @@
     'and no payment information passes through Tuition Khata’s servers. If anything on this page ever asks you for a PIN or OTP, stop and don’t enter it.</p></div>';
   card.innerHTML = html;
 
+  // qrcodejs renders INTO the element you give it (it inserts its own
+  // canvas/table), rather than drawing onto one you hand it — so #qr is
+  // a plain <div>, not a <canvas>.
   if (window.QRCode) {
-    window.QRCode.toCanvas(document.getElementById('qr'), upiLink, { width: 220, margin: 1 }, function () {});
+    new window.QRCode(document.getElementById('qr'), { text: upiLink, width: 220, height: 220, correctLevel: window.QRCode.CorrectLevel.H });
   }
 
   function wireCopy(buttonId, text) {
