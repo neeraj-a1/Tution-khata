@@ -102,6 +102,35 @@ function compressImage(file) {
     reader.readAsDataURL(file);
   });
 }
+// NEW: a separate, higher-quality compressor just for an uploaded UPI QR
+// code image. compressImage() above (used for payment-proof screenshots)
+// squeezes hard — 700px wide, 55% JPEG quality — which is fine for
+// something a human just needs to glance at, but a QR code is made of
+// small black/white squares that a phone camera has to read back
+// correctly. Too much compression can blur those squares enough that
+// scanning fails. This keeps more size and quality specifically so the
+// code stays reliably scannable, at the cost of a somewhat larger file.
+function compressQrCodeImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 900;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 function compressPhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -229,8 +258,12 @@ function App() {
   // with tutors who sign up and then go quiet. NEW: also takes an
   // optional email, as a second, non-WhatsApp way to reach someone —
   // WhatsApp outreach was getting the sender account restricted, so
-  // email is a lower-risk backup channel going forward.
-  async function createTutor(name, upi, pin, phone, email) {
+  // email is a lower-risk backup channel going forward. NEW: also takes
+  // the two optional UPI payment fields (upiMobile, qrImage) now offered
+  // at signup, same as email/phone above — same optional-ness, just
+  // saved at the same time instead of requiring a second Edit Profile
+  // visit.
+  async function createTutor(name, upi, pin, phone, email, upiMobile, qrImage) {
     setSaving(true);
     // NEW: attaches whichever source link this visitor arrived on (set
     // by the useEffect above), so signups can later be grouped by which
@@ -239,7 +272,7 @@ function App() {
     // as before.
     let signupSource = null;
     try { signupSource = localStorage.getItem('signup_source') || null; } catch (e) {}
-    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null, signup_source: signupSource }).select().single();
+    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null, upi_mobile: upiMobile ? upiMobile : null, upi_qr_image: qrImage ? qrImage : null, signup_source: signupSource }).select().single();
     if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
@@ -435,8 +468,11 @@ function App() {
   // CHANGED: now also saves an optional upi_mobile — a second UPI
   // payment option (pay-by-mobile-number) shown alongside the UPI ID and
   // QR code, for parents whose UPI app supports paying to a phone number.
-  async function updateProfile(name, upi, phone, email, upiMobile) {
-    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null, email: email ? email : null, upi_mobile: upiMobile ? upiMobile : null }).eq('id', tutorId).select().single();
+  // NEW: also saves an optional qrImage (a photo of the tutor's own bank/
+  // UPI app QR code) — passing null clears it, so removing the photo in
+  // Edit Profile actually removes it here rather than leaving the old one.
+  async function updateProfile(name, upi, phone, email, upiMobile, qrImage) {
+    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null, email: email ? email : null, upi_mobile: upiMobile ? upiMobile : null, upi_qr_image: qrImage ? qrImage : null }).eq('id', tutorId).select().single();
     if (res.error) return res.error.message || 'Could not update profile.';
     setProfile(res.data);
     setEditingProfile(false);
@@ -725,6 +761,7 @@ function App() {
       amount: qrAmount,
       upiId: profile.upi_id,
       upiMobile: profile.upi_mobile,
+      upiQrImage: profile.upi_qr_image,
       upiLink: buildUpiLink(qrMember, qrAmount),
       payPageUrl: buildPayPageUrl(qrAmount),
       onClose: () => setQrFor(null),
@@ -843,6 +880,13 @@ function Onboarding(props) {
   const [phone, setPhone] = useState('');
   // NEW: optional email — a second, non-WhatsApp way to reach someone.
   const [email, setEmail] = useState('');
+  // NEW: two optional UPI payment fields, collected at signup now
+  // instead of only in Edit Profile later — same fields, same
+  // optional-ness, just offered earlier so a tutor who already has
+  // this handy doesn't need a second visit to Edit Profile to add it.
+  const [upiMobile, setUpiMobile] = useState('');
+  const [qrImage, setQrImage] = useState('');
+  const qrImageInputRef = useRef(null);
   const [setupError, setSetupError] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
   const [recoverPin, setRecoverPin] = useState('');
@@ -860,13 +904,17 @@ function Onboarding(props) {
   const pinValid = /^\d{4}$/.test(pin);
   const phoneValid = /^\d{10}$/.test(phone);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // NEW: same validity check Edit Profile already uses for this field —
+  // only enforced if they actually type something in, since it's optional.
+  const upiMobileValid = /^\d{10}$/.test(upiMobile);
   // CHANGED: UPI ID is no longer required to sign up — it's only needed
   // once a tutor actually sends a payment reminder (sendReminder checks
   // for it then, and prompts them to add it via Edit Profile if it's
   // still missing). Signing up now only needs name, PIN, and phone.
   // Email is optional too, but if they do type one, it has to look
-  // like a real email before it's accepted.
-  const canSave = name.trim().length > 1 && pinValid && phoneValid && (email.length === 0 || emailValid);
+  // like a real email before it's accepted. Same for the UPI mobile
+  // number below — QR image has no format to validate.
+  const canSave = name.trim().length > 1 && pinValid && phoneValid && (email.length === 0 || emailValid) && (upiMobile.length === 0 || upiMobileValid);
   const recoverPinValid = /^\d{4}$/.test(recoverPin);
   // CHANGED: since UPI ID can now be blank for many tutors, matching on
   // it alone risks matching the wrong (or multiple) blank-UPI accounts.
@@ -883,8 +931,16 @@ function Onboarding(props) {
   const canResetPin = forgotUpi.trim().length > 1 && forgotPhoneValid && newPinsMatch;
   async function handleSave() {
     setSetupError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim(), email.trim());
+    const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim(), email.trim(), upiMobile.trim(), qrImage);
     if (errMsg) setSetupError(errMsg);
+  }
+  // NEW: reuses the same compressor an uploaded QR image needs — see the
+  // comment on compressQrCodeImage() for why this one is higher-quality
+  // than the other image compressors in this file (a QR code has to stay
+  // scannable, not just look fine to a human).
+  async function handleQrImageChange(file) {
+    if (!file) return;
+    try { const compressed = await compressQrCodeImage(file); setQrImage(compressed); } catch (e) {}
   }
   async function handleRecover() {
     setRecovering(true);
@@ -989,6 +1045,28 @@ function Onboarding(props) {
     h('input', { value: name, onChange: e => setName(e.target.value), placeholder: 'e.g. Priya Sharma', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID (optional — add it before your first reminder)'),
     h('input', { value: upi, onChange: e => setUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+    // NEW: two more optional payment fields, offered right here at
+    // signup instead of only later in Edit Profile — same fields, same
+    // optional-ness. A tutor can skip both and add them later.
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'UPI-linked mobile number (optional)'),
+    h('div', { className: 'flex items-center gap-2 mb-1' },
+      h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
+      h('input', { value: upiMobile, onChange: e => setUpiMobile(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
+    ),
+    (upiMobile.length > 0 && !upiMobileValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'Only fill this in if your UPI ID is actually linked to this number. Leave blank if you\'re not sure.'),
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI QR code image (optional)'),
+    h('input', { ref: qrImageInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handleQrImageChange(e.target.files[0]) }),
+    h('div', { className: 'flex items-center gap-3 mb-1' },
+      qrImage ? h('img', { src: qrImage, style: { borderColor: colors.border }, className: 'w-14 h-14 rounded-md border object-cover' }) : null,
+      h('button', {
+        type: 'button',
+        onClick: () => qrImageInputRef.current.click(),
+        style: { borderColor: colors.border, color: colors.inkSoft },
+        className: 'border rounded-md px-3 py-2 text-xs font-medium'
+      }, qrImage ? 'Change photo' : 'Upload a photo of your QR code')
+    ),
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'A screenshot of your own bank/UPI app QR code, shown as another way to pay besides your UPI ID. This is just a picture — it can\'t have the amount pre-filled the way your UPI ID can, so leave it blank if typing your UPI ID above works fine for you.'),
     // NEW field: tutor's own WhatsApp number.
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
     h('div', { className: 'flex items-center gap-2 mb-1' },
@@ -1036,11 +1114,20 @@ function ProfileEditModal(props) {
   // number above — not every tutor's UPI ID is tied to their phone
   // number, and this is a different, narrower use.
   const [upiMobile, setUpiMobile] = useState(profile.upi_mobile || '');
+  // NEW: lets an existing tutor add (or replace, or remove) a photo of
+  // their own UPI QR code — same field signup now offers, just also
+  // reachable here for the many tutors who signed up before it existed.
+  const [qrImage, setQrImage] = useState(profile.upi_qr_image || '');
+  const qrImageInputRef = useRef(null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const phoneValid = /^\d{10}$/.test(phone);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const upiMobileValid = /^\d{10}$/.test(upiMobile);
+  async function handleQrImageChange(file) {
+    if (!file) return;
+    try { const compressed = await compressQrCodeImage(file); setQrImage(compressed); } catch (e) {}
+  }
   // CHANGED: UPI ID no longer blocks saving other profile changes — a
   // tutor can fix their name or phone number without also being forced
   // to add UPI right then. sendReminder() checks for UPI separately,
@@ -1049,7 +1136,7 @@ function ProfileEditModal(props) {
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim(), email.trim(), upiMobile.trim());
+    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim(), email.trim(), upiMobile.trim(), qrImage);
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -1078,6 +1165,26 @@ function ProfileEditModal(props) {
       ),
       (upiMobile.length > 0 && !upiMobileValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Only fill this in if your UPI ID is actually linked to this number — shown as a second way to pay, alongside your UPI ID and QR code. Leave blank if you\'re not sure; the QR code and UPI ID already work on their own.'),
+      // NEW: lets a tutor upload a photo of their own bank/UPI app QR
+      // code, shown as another way to pay in the in-app payment popup.
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI QR code image (optional)'),
+      h('input', { ref: qrImageInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handleQrImageChange(e.target.files[0]) }),
+      h('div', { className: 'flex items-center gap-3 mb-1' },
+        qrImage ? h('img', { src: qrImage, style: { borderColor: colors.border }, className: 'w-14 h-14 rounded-md border object-cover' }) : null,
+        h('button', {
+          type: 'button',
+          onClick: () => qrImageInputRef.current.click(),
+          style: { borderColor: colors.border, color: colors.inkSoft },
+          className: 'border rounded-md px-3 py-2 text-xs font-medium'
+        }, qrImage ? 'Change photo' : 'Upload a photo of your QR code'),
+        qrImage ? h('button', {
+          type: 'button',
+          onClick: () => setQrImage(''),
+          style: { color: colors.inkSoft },
+          className: 'text-xs hover:underline'
+        }, 'Remove') : null
+      ),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'A screenshot of your own bank/UPI app QR code, shown as another way to pay besides your UPI ID. This is just a picture — it can\'t have the amount pre-filled the way your UPI ID can.'),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
       h('div', { className: 'flex items-center gap-2 mb-1' },
         h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
@@ -1108,7 +1215,7 @@ function ProfileEditModal(props) {
 // service, so no payment details ever leave the browser to generate it.
 function PaymentQrModal(props) {
   const member = props.member, amount = props.amount, upiId = props.upiId, upiMobile = props.upiMobile,
-        upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose, colors = props.colors;
+        upiQrImage = props.upiQrImage, upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose, colors = props.colors;
   const canvasRef = useRef(null);
   const [copied, setCopied] = useState('');
   useEffect(() => {
@@ -1155,6 +1262,14 @@ function PaymentQrModal(props) {
           h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm' }, '+91 ' + upiMobile),
           h('button', { onClick: () => copy('mobile', upiMobile), style: { color: colors.inkSoft }, className: 'text-xs hover:underline shrink-0' }, copied === 'mobile' ? 'Copied' : 'Copy')
         )
+      ) : null,
+      // NEW: only shown if the tutor has uploaded their own QR code
+      // photo — a second, separate way to pay besides the auto-generated
+      // QR above. Unlike the QR above, this is just a picture, so it
+      // can't carry the amount — the note says as much.
+      upiQrImage ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2 text-center' },
+        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px] mb-2' }, 'Or scan this QR code instead (amount must be entered by hand)'),
+        h('img', { src: upiQrImage, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border, width: '160px', height: '160px', objectFit: 'contain' } })
       ) : null,
       h('a', { href: payPageUrl, target: '_blank', rel: 'noopener', style: { color: colors.inkSoft }, className: 'text-xs hover:underline block mt-1 text-center' }, 'Open as a shareable link ↗')
     )
@@ -1223,7 +1338,10 @@ function AddMemberModal(props) {
       h('input', { value: studentClass, onChange: e => setStudentClass(e.target.value), placeholder: 'e.g. Class 8', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's name (optional)"),
       h('input', { value: parentName, onChange: e => setParentName(e.target.value), placeholder: 'e.g. Mrs. Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (₹)'),
+      // NEW: labeled "required" so it's clear at a glance which fields on
+      // this form must be filled in versus the several optional ones
+      // (phone, class, parent's name) sitting right around it.
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (₹) — required'),
       h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), placeholder: 'e.g. 1500', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Student since'),
       h('input', { type: 'month', value: joinedMonth, onChange: e => setJoinedMonth(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
@@ -1292,7 +1410,7 @@ function EditMemberModal(props) {
       h('input', { value: studentClass, onChange: e => setStudentClass(e.target.value), placeholder: 'e.g. Class 8', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, "Parent's name (optional)"),
       h('input', { value: parentName, onChange: e => setParentName(e.target.value), placeholder: 'e.g. Mrs. Mehta', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (₹)'),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Monthly fee (₹) — required'),
       h('input', { value: fee, onChange: e => setFee(e.target.value.replace(/[^\d]/g,'')), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'This updates their fee going forward — months already marked paid are not affected.'),
       localError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, localError) : null,
