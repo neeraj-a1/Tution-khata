@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pay via UPI — Tuition Khata</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#1E2A3A">
+<!-- Same QR library as the main app (index.html) — draws the QR code
+     locally in the browser, nothing sent to any outside service. -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #E7E6D9; --paper-light: #F4F3EA; --ink: #1E2A3A;
+    --ink-soft: #5C6357; --border: #C9C7B4; --green: #2F6B3A; --red: #A6321F;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+  }
+  .card {
+    background: var(--paper-light); border-radius: 16px; padding: 24px;
+    width: 100%; max-width: 380px; text-align: center;
+  }
+  h1 { font-family: 'Arvo', serif; font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--ink-soft); font-size: 13px; margin: 0 0 20px; }
+  canvas { border: 1px solid var(--border); border-radius: 12px; margin: 0 auto; display: block; }
+  .amount { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 600; margin: 14px 0 2px; }
+  .amount-note { color: var(--ink-soft); font-size: 12px; margin: 0 0 18px; }
+  .pay-btn {
+    display: block; width: 100%; background: var(--ink); color: var(--paper-light);
+    text-decoration: none; padding: 13px; border-radius: 10px; font-weight: 600;
+    font-size: 14px; margin-bottom: 18px;
+  }
+  .row {
+    text-align: left; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 10px;
+  }
+  .row-label { color: var(--ink-soft); font-size: 11px; margin: 0 0 2px; }
+  .row-value-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .row-value { font-family: 'IBM Plex Mono', monospace; font-size: 14px; word-break: break-all; }
+  .copy-btn {
+    background: none; border: none; color: var(--ink-soft); font-size: 12px;
+    text-decoration: underline; cursor: pointer; padding: 0; flex-shrink: 0; font-family: inherit;
+  }
+  .trust {
+    display: flex; gap: 8px; align-items: flex-start; text-align: left;
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 16px;
+  }
+  .trust p { color: var(--ink-soft); font-size: 11px; line-height: 1.5; margin: 0; }
+  .error { color: var(--red); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <p class="error">Loading…</p>
+</div>
+<script>
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var upi = (params.get('upi') || '').trim();
+  var name = (params.get('name') || '').trim();
+  var amount = (params.get('amount') || '').trim();
+  var mobile = (params.get('mobile') || '').trim();
+  var card = document.getElementById('card');
+
+  if (!upi || !name || !amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    card.innerHTML = '<h1>Payment link incomplete</h1>' +
+      '<p class="error">This link is missing something it needs (a UPI ID, name, or amount). ' +
+      'Please ask for a fresh reminder message instead of using this link directly.</p>';
+    return;
+  }
+
+  // Same upi://pay string format as buildUpiLink() in the main app
+  // (index.html) — pa = payee UPI ID, pn = payee name, am = amount,
+  // cu = currency, tn = a short transaction note.
+  var upiParams = new URLSearchParams({ pa: upi, pn: name, am: amount, cu: 'INR', tn: 'Tuition fee' });
+  var upiLink = 'upi://pay?' + upiParams.toString();
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  var html = '';
+  html += '<h1>Pay ' + escapeHtml(name) + '</h1>';
+  html += '<p class="sub">via UPI — Tuition Khata</p>';
+  html += '<canvas id="qr"></canvas>';
+  html += '<p class="amount">₹' + escapeHtml(Number(amount).toLocaleString('en-IN')) + '</p>';
+  html += '<p class="amount-note">Scan with any UPI app (Google Pay, PhonePe, Paytm, or your bank app) to pay this amount.</p>';
+  html += '<a class="pay-btn" href="' + upiLink.replace(/"/g, '&quot;') + '">Open my UPI app to pay</a>';
+  html += '<div class="row"><p class="row-label">UPI ID</p><div class="row-value-line">' +
+    '<span class="row-value" id="upi-id-text">' + escapeHtml(upi) + '</span>' +
+    '<button class="copy-btn" id="copy-upi">Copy</button></div></div>';
+  if (mobile) {
+    html += '<div class="row"><p class="row-label">Or pay to this mobile number (if your UPI app supports it)</p><div class="row-value-line">' +
+      '<span class="row-value" id="mobile-text">' + escapeHtml(mobile) + '</span>' +
+      '<button class="copy-btn" id="copy-mobile">Copy</button></div></div>';
+  }
+  html += '<div class="trust"><span>🔒</span><p>This page only opens your own UPI app to pay ' +
+    escapeHtml(name) + ' directly — it never asks for your UPI PIN, OTP, card, or bank details, ' +
+    'and no payment information passes through Tuition Khata’s servers. If anything on this page ever asks you for a PIN or OTP, stop and don’t enter it.</p></div>';
+  card.innerHTML = html;
+
+  if (window.QRCode) {
+    window.QRCode.toCanvas(document.getElementById('qr'), upiLink, { width: 220, margin: 1 }, function () {});
+  }
+
+  function wireCopy(buttonId, text) {
+    var btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      function done() { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500); }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done).catch(done); }
+        else { done(); }
+      } catch (e) { done(); }
+    });
+  }
+  wireCopy('copy-upi', upi);
+  if (mobile) wireCopy('copy-mobile', mobile);
+})();
+</script>
+</body>
+</html>
