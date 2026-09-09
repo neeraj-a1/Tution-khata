@@ -14,6 +14,11 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- NEW: renders the UPI QR code shown in the payment QR popup and on
+     pay.html — a small, dependency-free library, MIT licensed, no data
+     ever leaves the browser (it draws locally into a <canvas>, it does
+     not call any external "QR generator" API). -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -147,6 +152,9 @@ function App() {
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [remindQueue, setRemindQueue] = useState(null);
+  // NEW: which member's payment QR popup is open (null = closed). Same
+  // pattern as markPaidFor just above.
+  const [qrFor, setQrFor] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingProfile, setEditingProfile] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -308,9 +316,33 @@ function App() {
     });
     return 'upi://pay?' + params.toString();
   }
+  // NEW: a normal https:// link to the new pay.html page, which shows a
+  // "tap to pay" button, a scannable QR code, the UPI ID, and (if set)
+  // the UPI-linked mobile number, all in one place — everything the
+  // parent needs regardless of which UPI app they use or which device
+  // they're reading the reminder on.
+  //
+  // Why this exists alongside buildUpiLink(): a raw "upi://pay?..." link
+  // (what the reminder used to send) only works when it's tapped on a
+  // phone that has a UPI app installed to catch that link. If a parent
+  // reads the WhatsApp reminder on WhatsApp Web or WhatsApp Desktop —
+  // common for anyone checking messages at work — tapping that link does
+  // nothing, because desktop browsers have no UPI app registered to
+  // handle it. This page fixes that: on a phone, the "tap to pay" button
+  // still opens the UPI app directly; on a desktop, the parent can see
+  // the QR code on screen and scan it with their phone instead.
+  function buildPayPageUrl(amount) {
+    const params = new URLSearchParams({
+      upi: profile.upi_id, name: profile.name, amount: String(amount)
+    });
+    if (profile.upi_mobile && profile.upi_mobile.trim().length > 0) {
+      params.set('mobile', profile.upi_mobile.trim());
+    }
+    return 'https://tuitionkhata.in/pay.html?' + params.toString();
+  }
   function sendReminder(member) {
     // NEW: UPI ID is now optional at signup, so it may be missing here.
-    // Without it, buildUpiLink() would produce a broken payment link —
+    // Without it, buildPayPageUrl() would produce a broken payment link —
     // catch that before opening WhatsApp with something unusable.
     if (!profile.upi_id || profile.upi_id.trim().length === 0) {
       alert('Add your UPI ID first (tap Edit Profile) so this reminder includes a working payment link.');
@@ -320,16 +352,29 @@ function App() {
     if (outstanding.length === 0) return;
     const total = outstanding.length * Number(member.fee);
     const monthsList = outstanding.map(monthLabel).join(', ');
-    const upiLink = buildUpiLink(member, total);
+    // CHANGED: was buildUpiLink(member, total) (a raw upi://pay link).
+    // Now sends the pay.html link instead — see buildPayPageUrl() above
+    // for why. buildUpiLink() itself is unchanged and is still used to
+    // draw the QR code, both here in-app and on pay.html.
+    const payLink = buildPayPageUrl(total);
     const breakdown = outstanding.length > 1
       ? ' (' + outstanding.length + ' months × Rs.' + member.fee + ')'
       : '';
     const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
       "\nTotal due: Rs." + total + breakdown +
-      "\n\nPay here: " + upiLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent via Tuition Khata";
+      "\n\nPay here: " + payLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent via Tuition Khata";
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
+  }
+  // NEW: opens the in-app payment QR popup for a member, with the same
+  // missing-UPI-ID guard as sendReminder() above.
+  function openQr(member) {
+    if (!profile.upi_id || profile.upi_id.trim().length === 0) {
+      alert('Add your UPI ID first (tap Edit Profile) so this shows a working QR code.');
+      return;
+    }
+    setQrFor(member.id);
   }
   async function handleMarkPaid(memberId, monthsToMark, file) {
     setSaving(true);
@@ -387,8 +432,11 @@ function App() {
   // never had a way to add one until now. NEW: also saves an optional
   // email, so existing tutors can add one even though signup didn't
   // originally ask for it.
-  async function updateProfile(name, upi, phone, email) {
-    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null, email: email ? email : null }).eq('id', tutorId).select().single();
+  // CHANGED: now also saves an optional upi_mobile — a second UPI
+  // payment option (pay-by-mobile-number) shown alongside the UPI ID and
+  // QR code, for parents whose UPI app supports paying to a phone number.
+  async function updateProfile(name, upi, phone, email, upiMobile) {
+    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null, email: email ? email : null, upi_mobile: upiMobile ? upiMobile : null }).eq('id', tutorId).select().single();
     if (res.error) return res.error.message || 'Could not update profile.';
     setProfile(res.data);
     setEditingProfile(false);
@@ -476,10 +524,16 @@ function App() {
           'Total due: ₹' + totalDue.toLocaleString('en-IN') + (outstanding.length > 1 ? ' (' + outstanding.length + ' months)' : '')
         ) : h('div', { className: 'mb-3' }),
         outstanding.length > 0
-          ? h('div', { className: 'flex gap-2' },
+          ? h('div', { className: 'flex gap-2 mb-2' },
               h('button', { onClick: () => sendReminder(m), style: { backgroundColor: COLORS.ink, color: COLORS.paperLight }, className: 'flex-1 rounded-md py-2 text-xs font-medium' }, 'Remind on WhatsApp'),
               h('button', { onClick: () => setMarkPaidFor(m.id), style: { borderColor: COLORS.ink, color: COLORS.ink }, className: 'flex-1 rounded-md py-2 text-xs font-medium border' }, 'Mark Paid')
             )
+          : null,
+        // NEW: shows a scannable UPI QR code for this student's due
+        // amount — for showing on screen in person, or for a parent
+        // scanning off a laptop where "Remind on WhatsApp" isn't handy.
+        outstanding.length > 0
+          ? h('button', { onClick: () => openQr(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'w-full border border-dashed rounded-md py-1.5 text-xs font-medium mb-3' }, '▦ Show payment QR')
           : null,
         h('button', {
           onClick: () => setExpandedHistory(isExpanded ? null : m.id),
@@ -583,6 +637,11 @@ function App() {
       );
   const markPaidMember = markPaidFor ? members.find(x => x.id === markPaidFor) : null;
   const markPaidOutstanding = markPaidMember ? outstandingMonths(markPaidMember, payments) : [];
+  // NEW: for the payment QR popup — same "find the member, compute what
+  // they still owe" pattern as markPaidMember/markPaidOutstanding above.
+  const qrMember = qrFor ? members.find(x => x.id === qrFor) : null;
+  const qrOutstanding = qrMember ? outstandingMonths(qrMember, payments) : [];
+  const qrAmount = qrMember ? qrOutstanding.length * Number(qrMember.fee) : 0;
   return h('div', { style: { backgroundColor: COLORS.paper, color: COLORS.ink }, className: 'min-h-screen font-sans' },
     h('div', { className: 'max-w-md mx-auto px-4 pb-24 pt-6' },
       h('div', { className: 'flex items-center gap-2 mb-1' },
@@ -658,6 +717,17 @@ function App() {
       saving: saving,
       outstandingMonths: markPaidOutstanding,
       onConfirm: (monthsToMark, file) => handleMarkPaid(markPaidFor, monthsToMark, file),
+      colors: COLORS
+    }) : null,
+    // NEW: the payment QR popup, opened via openQr() from a member's card.
+    qrMember ? h(PaymentQrModal, {
+      member: qrMember,
+      amount: qrAmount,
+      upiId: profile.upi_id,
+      upiMobile: profile.upi_mobile,
+      upiLink: buildUpiLink(qrMember, qrAmount),
+      payPageUrl: buildPayPageUrl(qrAmount),
+      onClose: () => setQrFor(null),
       colors: COLORS
     }) : null,
     // NEW: shown once, right after the tutor's first student is added.
@@ -959,19 +1029,27 @@ function ProfileEditModal(props) {
   // NEW: lets a tutor add an email even though signup didn't originally
   // ask for one — a second, non-WhatsApp way to reach them.
   const [email, setEmail] = useState(profile.email || '');
+  // NEW: an optional second UPI payment option — a mobile number the
+  // tutor's UPI ID is linked to, shown alongside the UPI ID and QR code
+  // so a parent whose UPI app supports "pay by mobile number" has that
+  // option too. Deliberately optional and separate from the WhatsApp
+  // number above — not every tutor's UPI ID is tied to their phone
+  // number, and this is a different, narrower use.
+  const [upiMobile, setUpiMobile] = useState(profile.upi_mobile || '');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const phoneValid = /^\d{10}$/.test(phone);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const upiMobileValid = /^\d{10}$/.test(upiMobile);
   // CHANGED: UPI ID no longer blocks saving other profile changes — a
   // tutor can fix their name or phone number without also being forced
   // to add UPI right then. sendReminder() checks for UPI separately,
   // when it's actually needed.
-  const canSave = name.trim().length > 1 && (phone.length === 0 || phoneValid) && (email.length === 0 || emailValid);
+  const canSave = name.trim().length > 1 && (phone.length === 0 || phoneValid) && (email.length === 0 || emailValid) && (upiMobile.length === 0 || upiMobileValid);
   async function handleSubmit() {
     setSubmitting(true);
     setLocalError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim(), email.trim());
+    const errMsg = await onSave(name.trim(), upi.trim(), phone.trim(), email.trim(), upiMobile.trim());
     setSubmitting(false);
     if (errMsg) setLocalError(errMsg);
   }
@@ -990,6 +1068,16 @@ function ProfileEditModal(props) {
       h('input', { value: name, onChange: e => setName(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID (needed before you can send a reminder)'),
       h('input', { value: upi, onChange: e => setUpi(e.target.value), style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
+      // NEW: optional second UPI payment option, shown next to UPI ID
+      // since the two are always displayed together on the QR popup and
+      // pay.html.
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'UPI-linked mobile number (optional)'),
+      h('div', { className: 'flex items-center gap-2 mb-1' },
+        h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
+        h('input', { value: upiMobile, onChange: e => setUpiMobile(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
+      ),
+      (upiMobile.length > 0 && !upiMobileValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Only fill this in if your UPI ID is actually linked to this number — shown as a second way to pay, alongside your UPI ID and QR code. Leave blank if you\'re not sure; the QR code and UPI ID already work on their own.'),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
       h('div', { className: 'flex items-center gap-2 mb-1' },
         h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
@@ -1008,6 +1096,61 @@ function ProfileEditModal(props) {
         style: { backgroundColor: colors.ink, color: colors.paperLight, opacity: (canSave && !submitting) ? 1 : 0.5 },
         className: 'w-full rounded-md py-2.5 text-sm font-medium'
       }, submitting ? 'Saving…' : 'Save changes')
+    )
+  );
+}
+// NEW component: shows a scannable UPI QR code for one student's due
+// amount, plus the UPI ID and (if set) the UPI-linked mobile number as
+// copyable text — everything gathered in one place, whether the tutor is
+// showing this on screen in person or sharing the "shareable payment
+// page" link separately. Draws the QR client-side with the qrcode.min.js
+// library loaded in <head> — nothing here calls out to any external
+// service, so no payment details ever leave the browser to generate it.
+function PaymentQrModal(props) {
+  const member = props.member, amount = props.amount, upiId = props.upiId, upiMobile = props.upiMobile,
+        upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose, colors = props.colors;
+  const canvasRef = useRef(null);
+  const [copied, setCopied] = useState('');
+  useEffect(() => {
+    if (canvasRef.current && window.QRCode) {
+      window.QRCode.toCanvas(canvasRef.current, upiLink, { width: 220, margin: 1 }, function() {});
+    }
+  }, [upiLink]);
+  function copy(label, text) {
+    function done() { setCopied(label); setTimeout(() => setCopied(''), 1500); }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done).catch(done); }
+      else { done(); }
+    } catch (e) { done(); }
+  }
+  return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-sm rounded-xl p-5' },
+      h('div', { className: 'flex items-center justify-between mb-3' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, member.name + "'s payment"),
+        h('button', { onClick: onClose }, '✕')
+      ),
+      h('div', { className: 'text-center mb-3' },
+        h('canvas', { ref: canvasRef, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border } }),
+        h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2' }, '₹' + Number(amount).toLocaleString('en-IN')),
+        h('p', { style: { color: colors.inkSoft }, className: 'text-xs' }, 'Scan with any UPI app to pay this amount.')
+      ),
+      h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2' },
+        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, 'UPI ID'),
+        h('div', { className: 'flex items-center justify-between gap-2' },
+          h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm break-all' }, upiId),
+          h('button', { onClick: () => copy('upi', upiId), style: { color: colors.inkSoft }, className: 'text-xs hover:underline shrink-0' }, copied === 'upi' ? 'Copied' : 'Copy')
+        )
+      ),
+      // NEW: only shown if the tutor has actually added one — see the
+      // note in Edit Profile on why this is opt-in.
+      upiMobile ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2' },
+        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, 'Or pay to this mobile number (if their UPI app supports it)'),
+        h('div', { className: 'flex items-center justify-between gap-2' },
+          h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm' }, '+91 ' + upiMobile),
+          h('button', { onClick: () => copy('mobile', upiMobile), style: { color: colors.inkSoft }, className: 'text-xs hover:underline shrink-0' }, copied === 'mobile' ? 'Copied' : 'Copy')
+        )
+      ) : null,
+      h('a', { href: payPageUrl, target: '_blank', rel: 'noopener', style: { color: colors.inkSoft }, className: 'text-xs hover:underline block mt-1 text-center' }, 'Open as a shareable link ↗')
     )
   );
 }
