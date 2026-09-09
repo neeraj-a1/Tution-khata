@@ -395,7 +395,11 @@ function App() {
       : '';
     const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
       "\nTotal due: Rs." + total + breakdown +
-      "\n\nPay here: " + payLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent via Tuition Khata";
+      // CHANGED (per Neeraj): was "— sent via Tuition Khata" — added the
+      // tutor's own name so the closing line reads as "this message was
+      // sent by your tutor, using this tool" rather than just naming the
+      // tool alone, which is clearer about who it's actually from.
+      "\n\nPay here: " + payLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + profile.name + " via Tuition Khata";
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
