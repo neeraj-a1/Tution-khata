@@ -16,9 +16,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <!-- NEW: renders the UPI QR code shown in the payment QR popup and on
      pay.html — a small, dependency-free library, MIT licensed, no data
-     ever leaves the browser (it draws locally into a <canvas>, it does
-     not call any external "QR generator" API). -->
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+     ever leaves the browser (it draws entirely locally, it does not
+     call any external "QR generator" API). -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1112,8 +1112,14 @@ function PaymentQrModal(props) {
   const canvasRef = useRef(null);
   const [copied, setCopied] = useState('');
   useEffect(() => {
+    // qrcodejs renders INTO a container element (it inserts its own
+    // canvas/table), rather than drawing onto one you hand it — so this
+    // ref is a plain <div>, not a <canvas>. Clear it first so re-running
+    // this (e.g. if the amount changes) doesn't stack a second QR code
+    // inside the same box.
     if (canvasRef.current && window.QRCode) {
-      window.QRCode.toCanvas(canvasRef.current, upiLink, { width: 220, margin: 1 }, function() {});
+      canvasRef.current.innerHTML = '';
+      new window.QRCode(canvasRef.current, { text: upiLink, width: 220, height: 220, correctLevel: window.QRCode.CorrectLevel.H });
     }
   }, [upiLink]);
   function copy(label, text) {
@@ -1130,7 +1136,7 @@ function PaymentQrModal(props) {
         h('button', { onClick: onClose }, '✕')
       ),
       h('div', { className: 'text-center mb-3' },
-        h('canvas', { ref: canvasRef, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border } }),
+        h('div', { ref: canvasRef, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border, width: '222px', height: '222px' } }),
         h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2' }, '₹' + Number(amount).toLocaleString('en-IN')),
         h('p', { style: { color: colors.inkSoft }, className: 'text-xs' }, 'Scan with any UPI app to pay this amount.')
       ),
