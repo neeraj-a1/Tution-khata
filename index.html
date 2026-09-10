@@ -411,11 +411,20 @@ function App() {
     if (outstanding.length === 0) return;
     const total = outstanding.length * Number(member.fee);
     const monthsList = outstanding.map(monthLabel).join(', ');
-    // CHANGED: was buildUpiLink(member, total) (a raw upi://pay link).
-    // Now sends the pay.html link instead — see buildPayPageUrl() above
-    // for why. buildUpiLink() itself is unchanged and is still used to
-    // draw the QR code, both here in-app and on pay.html.
-    const payLink = buildPayPageUrl(total);
+    // CHANGED BACK (per Neeraj): this briefly sent the pay.html link
+    // instead of a raw upi://pay link — see buildPayPageUrl()'s comment
+    // above for that reasoning (it also works on WhatsApp Web/Desktop,
+    // where a raw upi:// link does nothing). Reverted to the raw link
+    // on purpose: it contains no domain or brand name at all, since it
+    // isn't a web link, so it fully avoids the "why does this mention
+    // Tuition Khata" question rather than just minimizing it. The
+    // tradeoff — it silently does nothing if a parent opens the
+    // reminder on a computer instead of their phone — was judged the
+    // smaller risk for this audience. buildPayPageUrl() itself is kept
+    // and still used by the in-app payment QR popup's "Open as a
+    // shareable link" option, for a tutor who explicitly wants that
+    // fallback for a specific parent.
+    const payLink = buildUpiLink(member, total);
     const breakdown = outstanding.length > 1
       ? ' (' + outstanding.length + ' months × Rs.' + member.fee + ')'
       : '';
