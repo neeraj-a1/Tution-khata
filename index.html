@@ -55,6 +55,32 @@ const COLORS = {
   paper: '#E7E6D9', paperLight: '#F4F3EA', ink: '#1E2A3A',
   inkSoft: '#5C6357', redInk: '#A6321F', greenInk: '#2F6B3A', border: '#C9C7B4',
 };
+// NEW: content for the "landing" screen shown to a first-time, signed-out
+// visitor before the "is this you?" gate — see Onboarding()'s mode ===
+// 'landing' block. Kept as plain data here (rather than inline in the
+// component) so the actual copy is easy to find and edit later without
+// digging through JSX. Every line here is either a real feature already
+// in this file, an accurate description of the real sign-up flow, or the
+// same honest trust language already used on pay.html — nothing here is
+// a fabricated stat, testimonial, or user count.
+const LANDING_FEATURES = [
+  { icon: '👥', title: 'Track every student', desc: 'Name, class, monthly fee, and full payment history — all in one register.' },
+  { icon: '💬', title: 'Remind parents on WhatsApp', desc: 'A ready-made message with a UPI payment link, sent in one tap — no more awkward calls.' },
+  { icon: '📷', title: 'Accept payment your way', desc: 'An auto-generated UPI QR with the exact amount filled in, or your own saved QR code and UPI mobile number.' },
+  { icon: '🔒', title: 'PIN-protected', desc: 'Your register opens only with your own 5-digit PIN, on any device you log in from.' },
+  { icon: '📤', title: 'Your data, exportable anytime', desc: 'Download a full backup as a CSV file whenever you want it — nothing locked in.' },
+];
+const LANDING_STEPS = [
+  'Sign up with your name, WhatsApp number, and a 5-digit PIN — no UPI ID needed to get started.',
+  'Add your students and their monthly fee.',
+  'Tap “Remind” when a fee is due — WhatsApp opens with the message and payment link already filled in.',
+];
+const LANDING_FAQ = [
+  { q: 'Is it really free?', a: 'Yes. There is no fee, no credit card required at sign-up, and no trial period that runs out.' },
+  { q: 'Do parents need to install anything?', a: 'No. Reminders go through WhatsApp, which they already have, and the payment link just opens their own UPI app.' },
+  { q: 'Where does the money go when a parent pays?', a: 'Straight to your own UPI ID, every time. Payments never pass through Tuition Khata — this app only generates the link and QR code.' },
+  { q: 'Is my data safe?', a: 'Your register is protected by your own PIN, and you can download a complete backup of your data at any time.' },
+];
 function monthKey(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
 function monthLabel(k) { const parts = k.split('-').map(Number); return MONTHS[parts[1]-1] + ' ' + parts[0]; }
 function formatDate(iso) { return new Date(iso).toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
@@ -729,17 +755,20 @@ function App() {
       // NEW: shown only before signup/login (profile is null then) — a
       // short, honest trust note addressing the exact worry a new
       // visitor is likely to have (is this a scam?). Placed above the
-      // form itself, so it's the first thing read, not the last. It
-      // also clarifies the "4-digit PIN" field further down isn't a
-      // UPI PIN, since both are on screen together and could otherwise
-      // read as contradictory.
+      // form itself, so it's the first thing read, not the last.
+      // CHANGED: text no longer says "the PIN below", since the very
+      // first screen a new visitor now sees is the landing/welcome
+      // screen (added below in Onboarding's mode === 'landing' block),
+      // which has no PIN field on it yet — "below" would have pointed
+      // at nothing. Kept generic so it reads correctly above every
+      // Onboarding screen, not just the sign-up form.
       !profile ? h('div', {
         style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border },
         className: 'rounded-lg border px-3 py-2.5 mb-4 flex items-start gap-2'
       },
         h('span', { className: 'text-sm leading-none mt-0.5' }, '🔒'),
         h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs leading-relaxed' },
-          'We never ask for your UPI PIN, bank OTP, or card details — on a call, on WhatsApp, or anywhere else. The 4-digit PIN below is only to log back into your own fee register on this app.'
+          'We never ask for your UPI PIN, bank OTP, or card details — on a call, on WhatsApp, or anywhere else. Your own 5-digit app PIN (set during sign-up) is only ever used to log back into your fee register.'
         )
       ) : null,
       mainContent
@@ -868,29 +897,29 @@ function RemindAllModal(props) {
 }
 function Onboarding(props) {
   const onSave = props.onSave, onRecover = props.onRecover, onResetPin = props.onResetPin, saving = props.saving, colors = props.colors;
-  // CHANGED: starts on 'gate' instead of 'new' — a one-tap "is this you?"
-  // screen shown before the signup form itself. A visitor who taps "No"
-  // never sees (or fills in) the form at all; a returning tutor can skip
-  // straight past it via "Already have a register? Recover it", which is
-  // also on the gate screen. This does not lengthen the form for anyone
-  // who actually is a tutor — if anything it's one tap faster for anyone
-  // who taps "No", since they never see the form's fields at all.
-  const [mode, setMode] = useState('gate');
+  // CHANGED: starts on 'landing' instead of 'gate' — a first-time visitor
+  // now sees a short trust-building welcome screen (what the app does,
+  // real features, how it works, and an honest FAQ) before the "is this
+  // you?" gate. A returning tutor can still skip straight past all of it
+  // via "Already have a register? Recover it", which appears on the
+  // landing screen itself, not just the gate.
+  const [mode, setMode] = useState('landing');
   const [name, setName] = useState('');
-  const [upi, setUpi] = useState('');
   const [pin, setPin] = useState('');
   // NEW: the tutor's own WhatsApp number, collected at signup so Neeraj
   // can check in later if they go quiet after adding only one student.
   const [phone, setPhone] = useState('');
   // NEW: optional email — a second, non-WhatsApp way to reach someone.
   const [email, setEmail] = useState('');
-  // NEW: two optional UPI payment fields, collected at signup now
-  // instead of only in Edit Profile later — same fields, same
-  // optional-ness, just offered earlier so a tutor who already has
-  // this handy doesn't need a second visit to Edit Profile to add it.
-  const [upiMobile, setUpiMobile] = useState('');
-  const [qrImage, setQrImage] = useState('');
-  const qrImageInputRef = useRef(null);
+  // CHANGED: UPI ID, the UPI-linked mobile number, and the QR code photo
+  // used to all be offered right here at signup. Moved out — with three
+  // optional payment fields sitting between "name" and the one number
+  // that's actually required, the form looked cluttered and made it easy
+  // to mix up "UPI-linked mobile number" with "your WhatsApp number".
+  // They're still fully available — just only in Edit Profile now, and
+  // sendReminder() already prompts for a UPI ID at the one moment it's
+  // actually needed (sending the first reminder), so nothing is lost by
+  // not asking for it up front.
   const [setupError, setSetupError] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
   const [recoverPin, setRecoverPin] = useState('');
@@ -905,46 +934,48 @@ function Onboarding(props) {
   const [newPin2, setNewPin2] = useState('');
   const [resettingPin, setResettingPin] = useState(false);
   const [resetPinError, setResetPinError] = useState('');
-  const pinValid = /^\d{4}$/.test(pin);
+  // CHANGED: PIN is now 5 digits, not 4 — a UPI PIN in India is always
+  // either 4 or 6 digits, never 5 (confirmed while checking this), so a
+  // 5-digit app PIN can never literally be the same number as anyone's
+  // real UPI PIN, by construction. No existing tutor has a 4-digit PIN
+  // on file yet (per Neeraj — nobody has completed a real sign-up or
+  // re-login on the live app so far), so this is applied everywhere at
+  // once: sign-up, login/recover, and PIN reset. If that ever stops
+  // being true (a real tutor is already using a 4-digit PIN), this
+  // would need a backward-compatible rollout instead — see the git
+  // history / README for that alternative if it's ever needed.
+  const pinValid = /^\d{5}$/.test(pin);
   const phoneValid = /^\d{10}$/.test(phone);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  // NEW: same validity check Edit Profile already uses for this field —
-  // only enforced if they actually type something in, since it's optional.
-  const upiMobileValid = /^\d{10}$/.test(upiMobile);
   // CHANGED: UPI ID is no longer required to sign up — it's only needed
   // once a tutor actually sends a payment reminder (sendReminder checks
   // for it then, and prompts them to add it via Edit Profile if it's
   // still missing). Signing up now only needs name, PIN, and phone.
   // Email is optional too, but if they do type one, it has to look
-  // like a real email before it's accepted. Same for the UPI mobile
-  // number below — QR image has no format to validate.
-  const canSave = name.trim().length > 1 && pinValid && phoneValid && (email.length === 0 || emailValid) && (upiMobile.length === 0 || upiMobileValid);
-  const recoverPinValid = /^\d{4}$/.test(recoverPin);
+  // like a real email before it's accepted.
+  const canSave = name.trim().length > 1 && pinValid && phoneValid && (email.length === 0 || emailValid);
+  const recoverPinValid = /^\d{5}$/.test(recoverPin);
   // CHANGED: since UPI ID can now be blank for many tutors, matching on
   // it alone risks matching the wrong (or multiple) blank-UPI accounts.
   // recoverUpi is now a flexible "UPI ID or WhatsApp number" field —
   // recoverAccount() matches whichever one this actually is.
   const canRecover = recoverUpi.trim().length > 3 && recoverPinValid;
   const forgotPhoneValid = /^\d{10}$/.test(forgotPhone);
-  const newPinValid = /^\d{4}$/.test(newPin);
+  const newPinValid = /^\d{5}$/.test(newPin);
   const newPinsMatch = newPinValid && newPin === newPin2;
   // CHANGED: Forgot PIN's second factor (paired with phone) is now the
   // tutor's name instead of UPI ID, since UPI ID is no longer guaranteed
   // to exist. forgotUpi/setForgotUpi are reused here as the name field
   // to keep this diff small — see the label text below.
   const canResetPin = forgotUpi.trim().length > 1 && forgotPhoneValid && newPinsMatch;
+  // CHANGED: upi/upiMobile/qrImage are no longer collected on this form
+  // (see the note above, near where those fields used to be declared),
+  // so they're passed through as empty here — createTutor already treats
+  // an empty UPI ID/mobile/QR image as "not set yet", the same as before.
   async function handleSave() {
     setSetupError('');
-    const errMsg = await onSave(name.trim(), upi.trim(), pin, phone.trim(), email.trim(), upiMobile.trim(), qrImage);
+    const errMsg = await onSave(name.trim(), '', pin, phone.trim(), email.trim(), '', '');
     if (errMsg) setSetupError(errMsg);
-  }
-  // NEW: reuses the same compressor an uploaded QR image needs — see the
-  // comment on compressQrCodeImage() for why this one is higher-quality
-  // than the other image compressors in this file (a QR code has to stay
-  // scannable, not just look fine to a human).
-  async function handleQrImageChange(file) {
-    if (!file) return;
-    try { const compressed = await compressQrCodeImage(file); setQrImage(compressed); } catch (e) {}
   }
   async function handleRecover() {
     setRecovering(true);
@@ -960,9 +991,87 @@ function Onboarding(props) {
     setResettingPin(false);
     if (errMsg) setResetPinError(errMsg);
   }
-  // NEW: the one-tap qualifying gate, shown first. Filters out the
-  // "signed up but was never actually a tutor" cases at the door,
-  // instead of after they've filled in name/phone/PIN.
+  // NEW: the welcome/trust screen, shown first to a signed-out visitor —
+  // modeled structurally on how polished competitor landing pages build
+  // trust (a clear hero, a feature list, numbered "how it works" steps,
+  // and an FAQ answering the exact questions a new visitor would have),
+  // but using only this app's real features and honest copy — no
+  // fabricated stats, testimonials, or user counts. Tapping either CTA
+  // moves on to the existing qualifying "gate" screen below.
+  if (mode === 'landing') {
+    return h('div', null,
+      h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5 mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'text-xl font-bold mb-2 leading-snug' }, 'A simple fee register for home tutors.'),
+        h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4 leading-relaxed' }, 'Track your students, remind parents over WhatsApp, and get paid straight to your own UPI ID — free, and built for you.'),
+        h('div', { className: 'flex flex-wrap gap-2 mb-4' },
+          ['Free to use', 'WhatsApp + UPI', 'No install for parents'].map(function (tag) {
+            return h('span', {
+              key: tag,
+              style: { color: colors.greenInk, borderColor: colors.greenInk },
+              className: 'text-[11px] font-medium border rounded-full px-2.5 py-1'
+            }, tag);
+          })
+        ),
+        h('button', {
+          onClick: () => setMode('gate'),
+          style: { backgroundColor: colors.ink, color: colors.paperLight },
+          className: 'w-full rounded-md py-2.5 text-sm font-medium mb-2'
+        }, 'Set up your free register'),
+        h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'w-full text-xs hover:underline' }, 'Already have a register? Recover it')
+      ),
+      h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5 mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-3 text-sm' }, 'What you get'),
+        h('div', { className: 'space-y-3' },
+          LANDING_FEATURES.map(function (f) {
+            return h('div', { key: f.title, className: 'flex items-start gap-3' },
+              h('span', { className: 'text-lg leading-none mt-0.5' }, f.icon),
+              h('div', null,
+                h('p', { className: 'text-sm font-medium' }, f.title),
+                h('p', { style: { color: colors.inkSoft }, className: 'text-xs leading-relaxed' }, f.desc)
+              )
+            );
+          })
+        )
+      ),
+      h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5 mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-3 text-sm' }, 'How it works'),
+        h('div', { className: 'space-y-3' },
+          LANDING_STEPS.map(function (s, i) {
+            return h('div', { key: i, className: 'flex items-start gap-3' },
+              h('span', {
+                style: { backgroundColor: colors.ink, color: colors.paperLight },
+                className: 'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-medium'
+              }, String(i + 1)),
+              h('p', { style: { color: colors.inkSoft }, className: 'text-xs leading-relaxed pt-0.5' }, s)
+            );
+          })
+        )
+      ),
+      h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5 mb-4' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-3 text-sm' }, 'Common questions'),
+        h('div', { className: 'space-y-3' },
+          LANDING_FAQ.map(function (item, i) {
+            return h('div', { key: i },
+              h('p', { className: 'text-xs font-medium mb-0.5' }, item.q),
+              h('p', { style: { color: colors.inkSoft }, className: 'text-xs leading-relaxed' }, item.a)
+            );
+          })
+        )
+      ),
+      h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1 text-sm' }, 'Ready to stop chasing fees?'),
+        h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4 leading-relaxed' }, 'Takes under a minute. No card, no training.'),
+        h('button', {
+          onClick: () => setMode('gate'),
+          style: { backgroundColor: colors.ink, color: colors.paperLight },
+          className: 'w-full rounded-md py-2.5 text-sm font-medium'
+        }, 'Get started — it’s free')
+      )
+    );
+  }
+  // NEW: the one-tap qualifying gate, shown after the landing screen.
+  // Filters out the "signed up but was never actually a tutor" cases at
+  // the door, instead of after they've filled in name/phone/PIN.
   if (mode === 'gate') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
       h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Quick check before you start'),
@@ -1000,10 +1109,10 @@ function Onboarding(props) {
         h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
         h('input', { value: forgotPhone, onChange: e => setForgotPhone(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
       ),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'New 4-digit PIN'),
-      h('input', { value: newPin, onChange: e => setNewPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60 tracking-widest' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'New 5-digit PIN'),
+      h('input', { value: newPin, onChange: e => setNewPin(e.target.value.replace(/\D/g,'').slice(0,5)), placeholder: '•••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60 tracking-widest' }),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Confirm new PIN'),
-      h('input', { value: newPin2, onChange: e => setNewPin2(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+      h('input', { value: newPin2, onChange: e => setNewPin2(e.target.value.replace(/\D/g,'').slice(0,5)), placeholder: '•••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
       (newPin2.length > 0 && !newPinsMatch) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'PINs don’t match.') : h('div', { className: 'mb-2' }),
       resetPinError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, resetPinError) : null,
       h('button', {
@@ -1018,11 +1127,11 @@ function Onboarding(props) {
   if (mode === 'recover') {
     return h('div', { style: { backgroundColor: colors.paperLight, borderColor: colors.border }, className: 'rounded-lg border p-5' },
       h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold mb-1' }, 'Recover your register'),
-      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter your UPI ID (or your WhatsApp number, if you didn’t set a UPI ID) and your 4-digit PIN.'),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-sm mb-4' }, 'Enter your UPI ID (or your WhatsApp number, if you didn’t set a UPI ID) and your 5-digit PIN.'),
       h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID or WhatsApp number'),
       h('input', { value: recoverUpi, onChange: e => setRecoverUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank or 9876543210', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your 4-digit PIN'),
-      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+      h('label', { className: 'block text-xs font-medium mb-1' }, 'Your 5-digit PIN'),
+      h('input', { value: recoverPin, onChange: e => setRecoverPin(e.target.value.replace(/\D/g,'').slice(0,5)), placeholder: '•••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
       recoverError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3 mt-2' }, recoverError) : h('div', { className: 'mb-4' }),
       h('button', {
         disabled: !canRecover || recovering,
@@ -1047,30 +1156,6 @@ function Onboarding(props) {
     h('button', { onClick: () => setMode('recover'), style: { color: colors.inkSoft }, className: 'text-xs hover:underline mb-4' }, 'Already have a register? Recover it'),
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your name'),
     h('input', { value: name, onChange: e => setName(e.target.value), placeholder: 'e.g. Priya Sharma', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI ID (optional — add it before your first reminder)'),
-    h('input', { value: upi, onChange: e => setUpi(e.target.value), placeholder: 'e.g. priya@okhdfcbank', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-3 bg-white/60' }),
-    // NEW: two more optional payment fields, offered right here at
-    // signup instead of only later in Edit Profile — same fields, same
-    // optional-ness. A tutor can skip both and add them later.
-    h('label', { className: 'block text-xs font-medium mb-1' }, 'UPI-linked mobile number (optional)'),
-    h('div', { className: 'flex items-center gap-2 mb-1' },
-      h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
-      h('input', { value: upiMobile, onChange: e => setUpiMobile(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
-    ),
-    (upiMobile.length > 0 && !upiMobileValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'Only fill this in if your UPI ID is actually linked to this number. Leave blank if you\'re not sure.'),
-    h('label', { className: 'block text-xs font-medium mb-1' }, 'Your UPI QR code image (optional)'),
-    h('input', { ref: qrImageInputRef, type: 'file', accept: 'image/*', className: 'hidden', onChange: e => handleQrImageChange(e.target.files[0]) }),
-    h('div', { className: 'flex items-center gap-3 mb-1' },
-      qrImage ? h('img', { src: qrImage, style: { borderColor: colors.border }, className: 'w-14 h-14 rounded-md border object-cover' }) : null,
-      h('button', {
-        type: 'button',
-        onClick: () => qrImageInputRef.current.click(),
-        style: { borderColor: colors.border, color: colors.inkSoft },
-        className: 'border rounded-md px-3 py-2 text-xs font-medium'
-      }, qrImage ? 'Change photo' : 'Upload a photo of your QR code')
-    ),
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' }, 'A screenshot of your own bank/UPI app QR code, shown as another way to pay besides your UPI ID. This is just a picture — it can\'t have the amount pre-filled the way your UPI ID can, so leave it blank if typing your UPI ID above works fine for you.'),
     // NEW field: tutor's own WhatsApp number.
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your WhatsApp number'),
     h('div', { className: 'flex items-center gap-2 mb-1' },
@@ -1082,13 +1167,30 @@ function Onboarding(props) {
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Your email (optional)'),
     h('input', { value: email, onChange: e => setEmail(e.target.value), placeholder: 'e.g. priya@gmail.com', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60' }),
     (email.length > 0 && !emailValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid email address.') : h('div', { className: 'mb-2' }),
-    h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 4-digit recovery PIN'),
-    h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,4)), placeholder: '••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
-    // CHANGED: shortened further, but kept "along with your UPI ID or
-    // WhatsApp number" — dropping that would let someone think the PIN
-    // alone is enough to log back in later, which isn't true (Recover
-    // needs both) and could lock them out for real.
+    // CHANGED (per Neeraj): PIN is 5 digits now, not 4 — a UPI PIN in
+    // India is always either 4 or 6 digits, never 5, so a 5-digit app
+    // PIN can never literally be the same as anyone's real UPI PIN. That
+    // makes the label/helper-text wording from before ("unique", "this
+    // is not your UPI PIN") redundant — it's now true by construction
+    // instead of by request, so both were simplified back down. The
+    // general "we never ask for your UPI PIN" note at the top of the
+    // screen was deliberately left as is — that one is about phishing
+    // (fake calls/WhatsApp messages asking for a real PIN), not digit
+    // count, so it still matters regardless of how many digits this
+    // field takes.
+    h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 5-digit PIN for this app'),
+    h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,5)), placeholder: '•••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
+    // CHANGED: kept "along with your UPI ID or WhatsApp number" —
+    // dropping that would let someone think the PIN alone is enough to
+    // log back in later, which isn't true (Recover needs both) and
+    // could lock them out for real.
     h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Save this PIN — you will need it along with your UPI ID or WhatsApp number to log back in.'),
+    // NEW: since UPI ID, the UPI-linked mobile number, and the QR photo
+    // are no longer collected on this form (moved to Edit Profile — see
+    // the comment near where their state used to be declared), this
+    // makes sure a new tutor knows those are still there to add, not
+    // silently dropped.
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'You can add your UPI ID, a UPI-linked mobile number, or a photo of your QR code anytime from Edit profile — no need to do it now.'),
     setupError ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-3' }, setupError) : null,
     h('button', {
       disabled: !canSave || saving,
@@ -1167,6 +1269,17 @@ function ProfileEditModal(props) {
         h('span', { style: { color: colors.inkSoft }, className: 'text-sm' }, '+91'),
         h('input', { value: upiMobile, onChange: e => setUpiMobile(e.target.value.replace(/\D/g,'').slice(0,10)), placeholder: '10-digit number', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'flex-1 border rounded-md px-3 py-2 text-sm bg-white/60' })
       ),
+      // NEW: for the common case — a tutor's UPI ID actually is linked to
+      // their own WhatsApp number — this fills the field in one tap
+      // instead of re-typing the same 10 digits. Only shown once the
+      // WhatsApp number field below is itself a valid 10-digit number;
+      // there's nothing correct to copy in yet if it isn't.
+      phoneValid ? h('button', {
+        type: 'button',
+        onClick: () => setUpiMobile(phone),
+        style: { color: colors.inkSoft },
+        className: 'text-xs hover:underline mb-2'
+      }, 'Same as my WhatsApp number') : null,
       (upiMobile.length > 0 && !upiMobileValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Only fill this in if your UPI ID is actually linked to this number — shown as a second way to pay, alongside your UPI ID and QR code. Leave blank if you\'re not sure; the QR code and UPI ID already work on their own.'),
       // NEW: lets a tutor upload a photo of their own bank/UPI app QR
