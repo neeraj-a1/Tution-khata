@@ -768,7 +768,7 @@ function App() {
       },
         h('span', { className: 'text-sm leading-none mt-0.5' }, '🔒'),
         h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs leading-relaxed' },
-          'We never ask for your UPI PIN, bank OTP, or card details — on a call, on WhatsApp, or anywhere else. Your own 5-digit app PIN (set during sign-up) is only ever used to log back into your fee register.'
+          'We never ask for your UPI PIN, bank OTP, or card details — on a call, on WhatsApp, or anywhere else. Your 5-digit app PIN is only ever used to log back into your fee register.'
         )
       ) : null,
       mainContent
@@ -819,11 +819,16 @@ function App() {
 function FirstStudentPromptModal(props) {
   const studentName = props.studentName, onAddAnother = props.onAddAnother, onLater = props.onLater, colors = props.colors;
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
-    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
-    // window height with its own scrollbar, so a long form like "Add
-    // Student" no longer looks oversized on a big screen.
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
+    // Full-width on mobile, narrower on laptop-size screens and up (lg: =
+    // 1024px+), and — CHANGED — now capped to 85% of the window height
+    // with its own scrollbar on every screen size, not just lg+. Before
+    // this fix, a phone in portrait mode with a tall form (Edit Profile,
+    // once it had several optional fields) had no scrollbar at all: the
+    // sheet is bottom-anchored on mobile, so anything taller than the
+    // screen just got pushed off the TOP, invisible and unreachable —
+    // Neeraj flagged this from a real phone screenshot. Capping the
+    // height and scrolling internally on every screen size fixes that.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-3' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, studentName + ' added'),
         h('button', { onClick: onLater }, '✕')
@@ -857,11 +862,16 @@ function RemindAllModal(props) {
     setIndex(index + 1);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
-    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
-    // window height with its own scrollbar, so a long form like "Add
-    // Student" no longer looks oversized on a big screen.
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
+    // Full-width on mobile, narrower on laptop-size screens and up (lg: =
+    // 1024px+), and — CHANGED — now capped to 85% of the window height
+    // with its own scrollbar on every screen size, not just lg+. Before
+    // this fix, a phone in portrait mode with a tall form (Edit Profile,
+    // once it had several optional fields) had no scrollbar at all: the
+    // sheet is bottom-anchored on mobile, so anything taller than the
+    // screen just got pushed off the TOP, invisible and unreachable —
+    // Neeraj flagged this from a real phone screenshot. Capping the
+    // height and scrolling internally on every screen size fixes that.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, done ? 'All done' : ('Reminder ' + (index + 1) + ' of ' + queue.length)),
         h('button', { onClick: onClose }, '✕')
@@ -1180,11 +1190,14 @@ function Onboarding(props) {
     // field takes.
     h('label', { className: 'block text-xs font-medium mb-1' }, 'Set a 5-digit PIN for this app'),
     h('input', { value: pin, onChange: e => setPin(e.target.value.replace(/\D/g,'').slice(0,5)), placeholder: '•••••', inputMode: 'numeric', style: { borderColor: colors.border }, className: 'w-full border rounded-md px-3 py-2 text-sm mb-1 bg-white/60 tracking-widest' }),
-    // CHANGED: kept "along with your UPI ID or WhatsApp number" —
-    // dropping that would let someone think the PIN alone is enough to
-    // log back in later, which isn't true (Recover needs both) and
-    // could lock them out for real.
-    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Save this PIN — you will need it along with your UPI ID or WhatsApp number to log back in.'),
+    // CHANGED: added "choose something you'll remember" here (this is
+    // the one screen where that actually applies — a login/recover
+    // screen would be the wrong place for it, since there someone is
+    // typing an existing PIN, not picking a new one). Kept "along with
+    // your UPI ID or WhatsApp number" — dropping that would let someone
+    // think the PIN alone is enough to log back in later, which isn't
+    // true (Recover needs both) and could lock them out for real.
+    h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Choose something you will remember — you will need this PIN, along with your UPI ID or WhatsApp number, to log back in.'),
     // NEW: since UPI ID, the UPI-linked mobile number, and the QR photo
     // are no longer collected on this form (moved to Edit Profile — see
     // the comment near where their state used to be declared), this
@@ -1247,11 +1260,16 @@ function ProfileEditModal(props) {
     if (errMsg) setLocalError(errMsg);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
-    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
-    // window height with its own scrollbar, so a long form like "Add
-    // Student" no longer looks oversized on a big screen.
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
+    // Full-width on mobile, narrower on laptop-size screens and up (lg: =
+    // 1024px+), and — CHANGED — now capped to 85% of the window height
+    // with its own scrollbar on every screen size, not just lg+. Before
+    // this fix, a phone in portrait mode with a tall form (Edit Profile,
+    // once it had several optional fields) had no scrollbar at all: the
+    // sheet is bottom-anchored on mobile, so anything taller than the
+    // screen just got pushed off the TOP, invisible and unreachable —
+    // Neeraj flagged this from a real phone screenshot. Capping the
+    // height and scrolling internally on every screen size fixes that.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit your profile'),
         h('button', { onClick: onClose }, '✕')
@@ -1273,13 +1291,17 @@ function ProfileEditModal(props) {
       // their own WhatsApp number — this fills the field in one tap
       // instead of re-typing the same 10 digits. Only shown once the
       // WhatsApp number field below is itself a valid 10-digit number;
-      // there's nothing correct to copy in yet if it isn't.
+      // there's nothing correct to copy in yet if it isn't. CHANGED (per
+      // Neeraj): given the same pill treatment (green border, rounded)
+      // as the trust badges on the welcome screen, instead of plain gray
+      // text — it's an action someone can take, not just a note, so it's
+      // meant to be noticed, not blend in.
       phoneValid ? h('button', {
         type: 'button',
         onClick: () => setUpiMobile(phone),
-        style: { color: colors.inkSoft },
-        className: 'text-xs hover:underline mb-2'
-      }, 'Same as my WhatsApp number') : null,
+        style: { color: colors.greenInk, borderColor: colors.greenInk },
+        className: 'text-xs font-medium border rounded-full px-2.5 py-1 mb-2'
+      }, '✓ Same as my WhatsApp number') : null,
       (upiMobile.length > 0 && !upiMobileValid) ? h('p', { style: { color: colors.redInk }, className: 'text-xs mb-2' }, 'Enter a valid 10-digit number.') : h('div', { className: 'mb-2' }),
       h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-4' }, 'Only fill this in if your UPI ID is actually linked to this number — shown as a second way to pay, alongside your UPI ID and QR code. Leave blank if you\'re not sure; the QR code and UPI ID already work on their own.'),
       // NEW: lets a tutor upload a photo of their own bank/UPI app QR
@@ -1426,11 +1448,16 @@ function AddMemberModal(props) {
     if (errMsg) setLocalError(errMsg);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
-    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
-    // window height with its own scrollbar, so a long form like "Add
-    // Student" no longer looks oversized on a big screen.
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
+    // Full-width on mobile, narrower on laptop-size screens and up (lg: =
+    // 1024px+), and — CHANGED — now capped to 85% of the window height
+    // with its own scrollbar on every screen size, not just lg+. Before
+    // this fix, a phone in portrait mode with a tall form (Edit Profile,
+    // once it had several optional fields) had no scrollbar at all: the
+    // sheet is bottom-anchored on mobile, so anything taller than the
+    // screen just got pushed off the TOP, invisible and unreachable —
+    // Neeraj flagged this from a real phone screenshot. Capping the
+    // height and scrolling internally on every screen size fixes that.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'New entry'),
         h('button', { onClick: onClose }, '✕')
@@ -1498,11 +1525,16 @@ function EditMemberModal(props) {
     if (errMsg) setLocalError(errMsg);
   }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
-    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
-    // window height with its own scrollbar, so a long form like "Add
-    // Student" no longer looks oversized on a big screen.
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
+    // Full-width on mobile, narrower on laptop-size screens and up (lg: =
+    // 1024px+), and — CHANGED — now capped to 85% of the window height
+    // with its own scrollbar on every screen size, not just lg+. Before
+    // this fix, a phone in portrait mode with a tall form (Edit Profile,
+    // once it had several optional fields) had no scrollbar at all: the
+    // sheet is bottom-anchored on mobile, so anything taller than the
+    // screen just got pushed off the TOP, invisible and unreachable —
+    // Neeraj flagged this from a real phone screenshot. Capping the
+    // height and scrolling internally on every screen size fixes that.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Edit student'),
         h('button', { onClick: onClose }, '✕')
@@ -1553,11 +1585,16 @@ function MarkPaidModal(props) {
   }
   function handleFile(f) { setFile(f); if (f) setPreview(URL.createObjectURL(f)); }
   return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
-    // Sized normally on mobile (w-full max-w-md); on laptop-size screens
-    // and up (lg: = 1024px+) it's narrower and capped to 85% of the
-    // window height with its own scrollbar, so a long form like "Add
-    // Student" no longer looks oversized on a big screen.
-    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm lg:max-h-[85vh] lg:overflow-y-auto rounded-xl p-5' },
+    // Full-width on mobile, narrower on laptop-size screens and up (lg: =
+    // 1024px+), and — CHANGED — now capped to 85% of the window height
+    // with its own scrollbar on every screen size, not just lg+. Before
+    // this fix, a phone in portrait mode with a tall form (Edit Profile,
+    // once it had several optional fields) had no scrollbar at all: the
+    // sheet is bottom-anchored on mobile, so anything taller than the
+    // screen just got pushed off the TOP, invisible and unreachable —
+    // Neeraj flagged this from a real phone screenshot. Capping the
+    // height and scrolling internally on every screen size fixes that.
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
       h('div', { className: 'flex items-center justify-between mb-4' },
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'Mark as paid'),
         h('button', { onClick: onClose }, '✕')
