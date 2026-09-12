@@ -107,6 +107,34 @@ function outstandingMonths(member, payments) {
     return !(p && p.paid);
   });
 }
+// NEW (Phase 1 activation fix): a client-side-only example student shown
+// only when a tutor has zero real students yet, so the register never
+// looks empty on first open. This is never written to Supabase — it has
+// no real database row, it is never included in exportCSV() or the "This
+// month" totals (those only ever loop over the real `members` state), and
+// it disappears on its own the instant the tutor adds their first real
+// student, since it is only ever rendered inside the `members.length ===
+// 0` branch in App() below.
+const SAMPLE_MEMBER = {
+  id: 'sample', name: 'Aarav Mehta', student_class: 'Class 8', parent_name: 'Sunita Mehta',
+  phone: '9876543210', fee: 1500, photo: null,
+};
+// NEW (Phase 1 activation fix): builds the exact same reminder message
+// format sendReminder() below would send for a real student, but for the
+// example student and without ever opening WhatsApp — used only by the
+// "See what a reminder looks like" preview on the empty-register screen,
+// so a brand-new tutor can see the real value (a ready-made WhatsApp +
+// UPI reminder) in under a minute, before adding anyone of their own.
+// When the tutor hasn't added a UPI ID yet (it's optional at signup),
+// this shows an honest placeholder instead of a fake or broken link.
+function buildSampleReminderMessage(tutorName, upiId) {
+  const payLine = (upiId && upiId.trim().length > 0)
+    ? ('upi://pay?pa=' + upiId.trim() + '&pn=' + encodeURIComponent(tutorName) + '&am=' + SAMPLE_MEMBER.fee + '&cu=INR&tn=Tuition%20fee')
+    : '[Your payment link will appear here once you add your UPI ID — tap Edit Profile]';
+  return "Hi! This is a reminder for " + SAMPLE_MEMBER.name + "'s tuition fee.\n\nFrom: " + tutorName + "\nPending: " + monthLabel(monthKey(new Date())) +
+    "\nTotal due: Rs." + SAMPLE_MEMBER.fee +
+    "\n\nPay here: " + payLine + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + tutorName + " via Tuition Khata";
+}
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -219,6 +247,10 @@ function App() {
   // prompt nudging them to add the rest of their class right away,
   // instead of leaving with just one student on file.
   const [justAddedFirst, setJustAddedFirst] = useState(null);
+  // NEW (Phase 1 activation fix): whether the "See what a reminder looks
+  // like" preview (shown from the example student on an empty register)
+  // is open.
+  const [showSamplePreview, setShowSamplePreview] = useState(false);
   useEffect(() => {
     function handler(e) {
       e.preventDefault();
@@ -356,7 +388,18 @@ function App() {
     if (res.error) { return res.error.message || 'Could not add student.'; }
     setMembers(members.concat([res.data]));
     setShowAdd(false);
-    if (wasFirstStudent) setJustAddedFirst(res.data.name);
+    if (wasFirstStudent) {
+      setJustAddedFirst(res.data.name);
+      // NEW (Phase 0 tracking): records the moment this tutor added their
+      // first real student — one of the four funnel moments (signed up,
+      // added 1+ student, sent 1+ reminder, returned 30 days later) the
+      // acquisition plan asks to measure. Fire-and-forget, same pattern as
+      // last_active_at in loadData() — never slows down or errors the
+      // tutor's own experience. .is(...) guards against ever overwriting
+      // it on a later re-add after a delete.
+      const now = new Date().toISOString();
+      sb.from('tutors').update({ first_member_added_at: now }).eq('id', tutorId).is('first_member_added_at', null).then(() => {});
+    }
     return null;
   }
   async function editMember(memberId, name, phone, fee, photo, studentClass, parentName) {
@@ -438,6 +481,19 @@ function App() {
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
+    // NEW (Phase 0 tracking): records the moment this tutor sent their
+    // first real reminder — another of the four funnel moments the
+    // acquisition plan asks to measure. Updates local state immediately
+    // so the "Get started" checklist below ticks off without needing a
+    // reload, and saves to Supabase in the background the same
+    // fire-and-forget way as last_active_at in loadData(). Guarded so it
+    // only ever gets set once, and only from a real member (sendReminder
+    // is never called for the sample/example student).
+    if (!profile.first_reminder_sent_at) {
+      const now = new Date().toISOString();
+      setProfile(Object.assign({}, profile, { first_reminder_sent_at: now }));
+      sb.from('tutors').update({ first_reminder_sent_at: now }).eq('id', tutorId).is('first_reminder_sent_at', null).then(() => {});
+    }
   }
   // NEW: opens the in-app payment QR popup for a member, with the same
   // missing-UPI-ID guard as sendReminder() above.
@@ -537,9 +593,64 @@ function App() {
     );
   }
   const errorBox = error ? h('div', { style: { color: COLORS.redInk }, className: 'text-sm mb-4' }, error) : null;
-  const emptyState = h('div', { style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'border border-dashed rounded-lg py-10 px-4 text-center mb-5' },
-    h('p', { className: 'text-sm' }, 'No entries yet.', h('br'), 'Add your first student to begin your register.')
+  // CHANGED (Phase 1 activation fix): a first-time tutor used to see a
+  // bare "No entries yet" box — real value (a WhatsApp + UPI reminder)
+  // was invisible until they'd already added a real student and a real
+  // month became due. Now the empty register shows one example student
+  // (never saved to Supabase — see SAMPLE_MEMBER above) with a working
+  // "See what a reminder looks like" preview, so the "aha" moment is
+  // visible in under two minutes, before they've typed anything in.
+  const emptyState = h('div', { className: 'mb-5' },
+    h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs mb-2' },
+      'Here’s an example of how a student looks in your register:'
+    ),
+    h('div', { style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border }, className: 'rounded-lg border border-dashed p-4' },
+      h('div', { className: 'flex items-start justify-between mb-1' },
+        h('div', null,
+          h('p', { className: 'font-semibold text-[15px]' }, SAMPLE_MEMBER.name),
+          h('p', { style: { color: COLORS.inkSoft }, className: 'text-xs mt-0.5' }, SAMPLE_MEMBER.student_class + ' • Example — not a real student')
+        ),
+        h(Stamp, { paid: false, label: '1 month due' })
+      ),
+      h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2 mb-3' },
+        '₹' + SAMPLE_MEMBER.fee.toLocaleString('en-IN'),
+        h('span', { style: { color: COLORS.inkSoft }, className: 'text-xs font-normal font-sans' }, ' / month')
+      ),
+      h('button', {
+        onClick: () => setShowSamplePreview(true),
+        style: { borderColor: COLORS.ink, color: COLORS.ink },
+        className: 'w-full border rounded-md py-2 text-xs font-medium'
+      }, '👀 See what a reminder looks like'),
+      h('p', { style: { color: COLORS.inkSoft }, className: 'text-[11px] mt-2 text-center' }, 'This example disappears the moment you add your first real student below.')
+    )
   );
+  // NEW (Phase 1 activation fix): a short "Get started" checklist —
+  // add 3 students, then send a first reminder — shown until both are
+  // done, then it disappears on its own. members.length only ever counts
+  // real students (the sample student is never added to `members`), and
+  // first_reminder_sent_at is the Phase 0 tracking field set in
+  // sendReminder() above.
+  const activationSteps = profile ? [
+    { label: 'Add 3 students', sub: members.length + ' of 3 added', done: members.length >= 3 },
+    { label: 'Send your first reminder', done: !!profile.first_reminder_sent_at },
+  ] : [];
+  const isActivated = activationSteps.length > 0 && activationSteps.every(function(s) { return s.done; });
+  const checklistCard = (profile && !isActivated) ? h('div', {
+    style: { backgroundColor: COLORS.paperLight, borderColor: COLORS.border },
+    className: 'rounded-lg border px-4 py-3 mb-4'
+  },
+    h('p', { style: { color: COLORS.inkSoft }, className: 'text-[11px] font-medium mb-2 uppercase tracking-wide' }, 'Get started'),
+    h('div', { className: 'space-y-1.5' },
+      activationSteps.map(function(s, i) {
+        return h('div', { key: i, className: 'flex items-center gap-2 text-sm' },
+          h('span', { style: { color: s.done ? COLORS.greenInk : COLORS.inkSoft } }, s.done ? '✓' : '○'),
+          h('span', { style: s.done ? { color: COLORS.inkSoft, textDecoration: 'line-through' } : {} },
+            s.label + (!s.done && s.sub ? ' (' + s.sub + ')' : '')
+          )
+        );
+      })
+    )
+  ) : null;
   const filteredMembers = members.filter(function(m) {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -701,6 +812,7 @@ function App() {
     ? h(Onboarding, { onSave: createTutor, onRecover: recoverAccount, onResetPin: resetPin, saving: saving, colors: COLORS })
     : h(React.Fragment, null,
         errorBox,
+        checklistCard,
         members.length === 0 ? emptyState : h(React.Fragment, null,
           summaryLine,
           remindAllButton,
@@ -816,6 +928,13 @@ function App() {
       onLater: () => setJustAddedFirst(null),
       colors: COLORS
     }) : null,
+    // NEW: the "See what a reminder looks like" preview, opened from the
+    // example student shown on an empty register (see emptyState above).
+    (showSamplePreview && profile) ? h(SamplePreviewModal, {
+      message: buildSampleReminderMessage(profile.name, profile.upi_id),
+      onClose: () => setShowSamplePreview(false),
+      colors: COLORS
+    }) : null,
     lightbox ? h('div', { className: 'fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50', onClick: () => setLightbox(null) },
       h('img', { src: lightbox, className: 'max-w-full max-h-full rounded-lg' })
     ) : null
@@ -855,6 +974,31 @@ function FirstStudentPromptModal(props) {
         style: { color: colors.inkSoft },
         className: 'w-full text-xs py-2 hover:underline'
       }, 'I’ll add more later')
+    )
+  );
+}
+// NEW component (Phase 1 activation fix): shows the exact WhatsApp
+// reminder message text a real student would generate, for the example
+// student on an empty register. Nothing here is sent anywhere — it is a
+// read-only preview so a brand-new tutor can see the app's real value
+// before adding a single student of their own.
+function SamplePreviewModal(props) {
+  const message = props.message, onClose = props.onClose, colors = props.colors;
+  return h('div', { className: 'fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4' },
+    h('div', { style: { backgroundColor: colors.paperLight }, className: 'w-full max-w-md lg:max-w-sm max-h-[85vh] overflow-y-auto rounded-xl p-5' },
+      h('div', { className: 'flex items-center justify-between mb-3' },
+        h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, 'This is what a reminder looks like'),
+        h('button', { onClick: onClose }, '✕')
+      ),
+      h('p', { style: { color: colors.inkSoft }, className: 'text-xs mb-3' },
+        'When a real student of yours has a fee due, tapping "Remind on WhatsApp" opens WhatsApp with a message like this one, ready to send. Nothing is sent from this example.'
+      ),
+      h('div', { style: { backgroundColor: '#DCF8C6', color: colors.ink, whiteSpace: 'pre-wrap' }, className: 'rounded-lg p-3 text-sm mb-4' }, message),
+      h('button', {
+        onClick: onClose,
+        style: { backgroundColor: colors.ink, color: colors.paperLight },
+        className: 'w-full rounded-md py-3 text-sm font-medium'
+      }, 'Got it')
     )
   );
 }
