@@ -13,7 +13,6 @@
 <meta name="apple-mobile-web-app-title" content="Khata">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <!-- NEW: renders the UPI QR code shown in the payment QR popup and on
      pay.html — a small, dependency-free library, MIT licensed, no data
      ever leaves the browser (it draws entirely locally, it does not
@@ -64,9 +63,32 @@ const { useState, useEffect, useRef } = React;
 const h = React.createElement;
 // ====================================================================
 const SUPABASE_URL = 'https://xgsbjyqdkeaeihzhadgs.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_vP7cJ9AA9Ubf5dVu_WxEkg_fuymQNU5';
+// CHANGED: the app no longer talks to the database tables directly.
+// Every table (tutors, members, payments) now has Row Level Security
+// turned on with no public access rules at all, so the key below can
+// no longer read or write any of them even though it's visible in this
+// page's source — which is the point: it can't be misused for that
+// anymore. All real data access instead goes through one server-side
+// function ("app-api"), which is the only thing allowed to touch the
+// tables, and which checks that whoever is asking has a valid session
+// for the tutor account they're asking about before doing anything.
+const EDGE_FUNCTION_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhnc2JqeXFka2VhZWloemhhZGdzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMjg4MjcsImV4cCI6MjEwMDkwNDgyN30.CHujvG_H2ZNET7XlFYAhmoVI_gBHLb82uOFWtU1ImZE';
+const API_URL = SUPABASE_URL + '/functions/v1/app-api';
+async function callApi(action, payload) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + EDGE_FUNCTION_JWT,
+      'apikey': EDGE_FUNCTION_JWT,
+    },
+    body: JSON.stringify(Object.assign({ action: action }, payload)),
+  });
+  let data;
+  try { data = await res.json(); } catch (e) { data = { error: 'Server error. Please try again.' }; }
+  return data;
+}
 // ====================================================================
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const COLORS = {
   paper: '#E7E6D9', paperLight: '#F4F3EA', ink: '#1E2A3A',
@@ -283,7 +305,12 @@ function App() {
   }
   useEffect(() => {
     const savedId = localStorage.getItem('tutor_id');
-    if (savedId) { setTutorId(savedId); loadData(savedId); }
+    const savedToken = localStorage.getItem('session_token');
+    // CHANGED: a saved tutor_id on its own is no longer enough to load
+    // anyone's dashboard — it also needs the matching session_token
+    // that was issued at sign up / recover / PIN reset. Without both,
+    // this is treated as logged out.
+    if (savedId && savedToken) { setTutorId(savedId); loadData(savedId, savedToken); }
     else { setLoading(false); }
   }, []);
   // NEW: silently captures which link brought this visitor here, e.g. a
@@ -299,33 +326,34 @@ function App() {
       if (src) localStorage.setItem('signup_source', src.slice(0, 60));
     } catch (e) {}
   }, []);
-  async function loadData(id) {
+  async function loadData(id, token) {
     setLoading(true);
-    // NEW: quietly records that this tutor's dashboard just loaded —
-    // i.e. that they came back after signing up. Fire-and-forget on
-    // purpose: nothing here should ever slow the dashboard down or
-    // show an error if it fails, and nothing about it is visible to
-    // the tutor. Deliberately only called from loadData, which only
-    // ever runs for an EXISTING tutor (a page reload with a saved
-    // login, or Recover / Forgot PIN) — never on first signup itself
-    // — so a tutor who signed up and never once came back keeps
-    // last_active_at as null, which is exactly the signal we want.
-    sb.from('tutors').update({ last_active_at: new Date().toISOString() }).eq('id', id).then(() => {});
-    const results = await Promise.all([
-      sb.from('tutors').select('*').eq('id', id).single(),
-      sb.from('members').select('*').eq('tutor_id', id)
-    ]);
-    const t = results[0], m = results[1];
-    if (t.data) setProfile(t.data);
-    const mem = m.data || [];
-    setMembers(mem);
-    if (mem.length) {
-      const ids = mem.map(x => x.id);
-      const p = await sb.from('payments').select('*').in('member_id', ids);
-      const map = {};
-      (p.data || []).forEach(pay => { map[pay.member_id + '_' + pay.month] = pay; });
-      setPayments(map);
+    // CHANGED: this used to run three direct table queries (and a
+    // fire-and-forget last_active_at update) straight from the
+    // browser. It's now one call to the server-side function, which
+    // does the same work but first checks that `token` is really the
+    // active session for tutor `id` — the last_active_at touch happens
+    // there too, on the same fire-and-forget basis as before.
+    const sessionToken = token || localStorage.getItem('session_token');
+    const res = await callApi('load_dashboard', { tutor_id: id, session_token: sessionToken });
+    if (res.error || !res.tutor) {
+      // Session is no longer valid (or something went wrong) — treat
+      // as logged out rather than showing a broken, data-less screen.
+      localStorage.removeItem('tutor_id');
+      localStorage.removeItem('session_token');
+      setTutorId(null);
+      setProfile(null);
+      setMembers([]);
+      setPayments({});
+      setLoading(false);
+      return;
     }
+    setProfile(res.tutor);
+    const mem = res.members || [];
+    setMembers(mem);
+    const map = {};
+    (res.payments || []).forEach(pay => { map[pay.member_id + '_' + pay.month] = pay; });
+    setPayments(map);
     setLoading(false);
   }
   // CHANGED: createTutor now also takes the tutor's own WhatsApp number
@@ -340,23 +368,6 @@ function App() {
   // visit.
   async function createTutor(name, upi, pin, phone, email, upiMobile, qrImage) {
     setSaving(true);
-    // NEW: refuse to create a second account on top of one that already
-    // has this UPI ID or this WhatsApp number. Without this check, a
-    // tutor signing up twice (for example after losing track of
-    // whether they already had an account) silently got two separate,
-    // unconnected registers — and recovering either one afterwards
-    // failed outright, because Supabase errors out when a recovery
-    // lookup matches more than one row instead of picking one.
-    if (upi && upi.trim()) {
-      const dupUpi = await sb.from('tutors').select('id').eq('upi_id', upi.trim()).limit(1);
-      if (dupUpi.error) { setSaving(false); return 'Something went wrong. Please try again.'; }
-      if (dupUpi.data && dupUpi.data.length) { setSaving(false); return 'An account with this UPI ID already exists. Use "Recover Account" instead of signing up again.'; }
-    }
-    if (phone && phone.trim()) {
-      const dupPhone = await sb.from('tutors').select('id').eq('phone_number', phone.trim()).limit(1);
-      if (dupPhone.error) { setSaving(false); return 'Something went wrong. Please try again.'; }
-      if (dupPhone.data && dupPhone.data.length) { setSaving(false); return 'An account with this WhatsApp number already exists. Use "Recover Account" instead of signing up again.'; }
-    }
     // NEW: attaches whichever source link this visitor arrived on (set
     // by the useEffect above), so signups can later be grouped by which
     // Facebook group / ad / post actually brought them in. null for a
@@ -364,19 +375,21 @@ function App() {
     // as before.
     let signupSource = null;
     try { signupSource = localStorage.getItem('signup_source') || null; } catch (e) {}
-    const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null, upi_mobile: upiMobile ? upiMobile : null, upi_qr_image: qrImage ? qrImage : null, signup_source: signupSource }).select().single();
-    if (res.error) {
-      // NEW: if a database-level uniqueness rule catches a duplicate
-      // that this check above missed (for example a race between two
-      // near-simultaneous signups), show the same plain-language
-      // message instead of a raw database error.
-      if (res.error.code === '23505') { setSaving(false); return 'An account with this UPI ID or WhatsApp number already exists. Use "Recover Account" instead of signing up again.'; }
-      setSaving(false); return res.error.message || 'Could not create your register.';
-    }
+    // CHANGED: signup now goes through the server-side function, which
+    // both checks for an existing account with the same UPI ID or
+    // WhatsApp number (refusing the signup instead of silently
+    // creating a duplicate register) and issues the session_token this
+    // device needs to load the dashboard afterward.
+    const res = await callApi('signup', {
+      name: name, upi: upi, pin: pin, phone: phone, email: email || null,
+      upi_mobile: upiMobile || null, qr_image: qrImage || null, signup_source: signupSource,
+    });
+    if (res.error) { setSaving(false); return res.error; }
     if (typeof fbq === 'function') { fbq('track', 'CompleteRegistration'); }
-    localStorage.setItem('tutor_id', res.data.id);
-    setTutorId(res.data.id);
-    setProfile(res.data);
+    localStorage.setItem('tutor_id', res.tutor.id);
+    localStorage.setItem('session_token', res.session_token);
+    setTutorId(res.tutor.id);
+    setProfile(res.tutor);
     setSaving(false);
     return null;
   }
@@ -387,25 +400,17 @@ function App() {
   // Existing tutors who set a UPI ID before this change still recover
   // exactly as before; nothing breaks for them.
   async function recoverAccount(identifier, pin) {
-    const val = identifier.trim();
-    // CHANGED: was .maybeSingle(), which throws an error (rather than
-    // just returning nothing useful) if more than one row matches —
-    // which is exactly what happens for an account that got duplicated
-    // by the signup bug above. Taking the oldest matching account
-    // instead means recovery still works for anyone caught by that
-    // bug, rather than failing with "Something went wrong."
-    const res = await sb.from('tutors')
-      .select('*')
-      .or('upi_id.eq.' + val + ',phone_number.eq.' + val)
-      .eq('recovery_pin', pin.trim())
-      .order('created_at', { ascending: true })
-      .limit(1);
-    if (res.error) return 'Something went wrong. Please try again.';
-    if (!res.data || !res.data.length) return 'No matching account found. Check your UPI ID (or WhatsApp number) and PIN are exactly right.';
-    const row = res.data[0];
-    localStorage.setItem('tutor_id', row.id);
-    setTutorId(row.id);
-    await loadData(row.id);
+    // CHANGED: now goes through the server-side function, which takes
+    // the oldest matching account rather than erroring out if more
+    // than one row matches (the case that used to produce "Something
+    // went wrong" for a duplicated account), and issues a fresh
+    // session_token for this device on success.
+    const res = await callApi('recover', { identifier: identifier.trim(), pin: pin.trim() });
+    if (res.error) return res.error;
+    localStorage.setItem('tutor_id', res.tutor.id);
+    localStorage.setItem('session_token', res.session_token);
+    setTutorId(res.tutor.id);
+    await loadData(res.tutor.id, res.session_token);
     return null;
   }
   // NEW: lets a tutor who forgot their PIN get back in without it, by
@@ -415,31 +420,16 @@ function App() {
   // exist.) Anyone who signed up before the phone number field existed
   // won't have one on file, so this won't find a match for them.
   async function resetPin(name, phone, newPin) {
-    // CHANGED: this used to run the PIN update directly against the
-    // name+phone filter. If two tutors ever shared the same name and
-    // phone number, that update would silently change BOTH of their
-    // PINs at once (Postgres updates every row a filter matches), and
-    // then .maybeSingle() would error trying to hand back more than
-    // one updated row. Looking the account up first, and updating only
-    // that one row by its id, makes this safe even if a name+phone
-    // pair is ever shared.
-    const lookup = await sb.from('tutors')
-      .select('id')
-      .ilike('name', name.trim())
-      .eq('phone_number', phone.trim())
-      .order('created_at', { ascending: true })
-      .limit(1);
-    if (lookup.error) return 'Something went wrong. Please try again.';
-    if (!lookup.data || !lookup.data.length) return 'No matching account found. Double-check your name and WhatsApp number are exactly right — or if you signed up a while ago, you may not have a WhatsApp number on file yet, in which case this won’t work and you’ll need help resetting it manually.';
-    const res = await sb.from('tutors')
-      .update({ recovery_pin: newPin })
-      .eq('id', lookup.data[0].id)
-      .select()
-      .maybeSingle();
-    if (res.error) return 'Something went wrong. Please try again.';
-    localStorage.setItem('tutor_id', res.data.id);
-    setTutorId(res.data.id);
-    await loadData(res.data.id);
+    // CHANGED: now goes through the server-side function, which looks
+    // the account up by name + phone and updates only that one row by
+    // its id — so even if a name+phone pair were ever shared by two
+    // tutors, only the matched account's PIN changes, never both.
+    const res = await callApi('reset_pin', { name: name.trim(), phone: phone.trim(), new_pin: newPin });
+    if (res.error) return res.error;
+    localStorage.setItem('tutor_id', res.tutor.id);
+    localStorage.setItem('session_token', res.session_token);
+    setTutorId(res.tutor.id);
+    await loadData(res.tutor.id, res.session_token);
     return null;
   }
   // CHANGED: addMember now notices when this was the tutor's first-ever
@@ -447,32 +437,32 @@ function App() {
   // the "add the rest of your class" prompt instead of just closing.
   async function addMember(name, phone, fee, joinedMonth, photo, studentClass, parentName) {
     const wasFirstStudent = members.length === 0;
-    const res = await sb.from('members')
-      .insert({ tutor_id: tutorId, name: name, phone: phone, fee: Number(fee), joined_month: joinedMonth, photo: photo, student_class: studentClass, parent_name: parentName }).select().single();
-    if (res.error) { return res.error.message || 'Could not add student.'; }
-    setMembers(members.concat([res.data]));
+    // CHANGED: goes through the server-side function now, which also
+    // records first_member_added_at itself when wasFirstStudent is
+    // true — same "only ever set once" guard as before, just running
+    // server-side instead of as a second fire-and-forget call here.
+    const res = await callApi('add_member', {
+      tutor_id: tutorId, session_token: localStorage.getItem('session_token'),
+      name: name, phone: phone, fee: fee, joined_month: joinedMonth,
+      photo: photo, student_class: studentClass, parent_name: parentName,
+      was_first_student: wasFirstStudent,
+    });
+    if (res.error) { return res.error; }
+    setMembers(members.concat([res.member]));
     setShowAdd(false);
-    if (wasFirstStudent) {
-      setJustAddedFirst(res.data.name);
-      // NEW (Phase 0 tracking): records the moment this tutor added their
-      // first real student — one of the four funnel moments (signed up,
-      // added 1+ student, sent 1+ reminder, returned 30 days later) the
-      // acquisition plan asks to measure. Fire-and-forget, same pattern as
-      // last_active_at in loadData() — never slows down or errors the
-      // tutor's own experience. .is(...) guards against ever overwriting
-      // it on a later re-add after a delete.
-      const now = new Date().toISOString();
-      sb.from('tutors').update({ first_member_added_at: now }).eq('id', tutorId).is('first_member_added_at', null).then(() => {});
-    }
+    if (wasFirstStudent) { setJustAddedFirst(res.member.name); }
     return null;
   }
   async function editMember(memberId, name, phone, fee, photo, studentClass, parentName) {
-    const updates = { name: name, phone: phone, fee: Number(fee), student_class: studentClass, parent_name: parentName };
-    if (photo !== undefined) updates.photo = photo;
-    const res = await sb.from('members')
-      .update(updates).eq('id', memberId).select().single();
-    if (res.error) { return res.error.message || 'Could not update student.'; }
-    setMembers(members.map(m => m.id === memberId ? res.data : m));
+    const payload = {
+      tutor_id: tutorId, session_token: localStorage.getItem('session_token'),
+      member_id: memberId, name: name, phone: phone, fee: fee,
+      student_class: studentClass, parent_name: parentName,
+    };
+    if (photo !== undefined) payload.photo = photo;
+    const res = await callApi('edit_member', payload);
+    if (res.error) { return res.error; }
+    setMembers(members.map(m => m.id === memberId ? res.member : m));
     setEditingMember(null);
     return null;
   }
@@ -556,7 +546,7 @@ function App() {
     if (!profile.first_reminder_sent_at) {
       const now = new Date().toISOString();
       setProfile(Object.assign({}, profile, { first_reminder_sent_at: now }));
-      sb.from('tutors').update({ first_reminder_sent_at: now }).eq('id', tutorId).is('first_reminder_sent_at', null).then(() => {});
+      callApi('mark_reminder_sent', { tutor_id: tutorId, session_token: localStorage.getItem('session_token') });
     }
   }
   // NEW: opens the in-app payment QR popup for a member, with the same
@@ -572,14 +562,13 @@ function App() {
     setSaving(true);
     let screenshot = null;
     try { if (file) screenshot = await compressImage(file); } catch (e) {}
-    const now = new Date().toISOString();
+    const res = await callApi('mark_paid', {
+      tutor_id: tutorId, session_token: localStorage.getItem('session_token'),
+      member_id: memberId, months: monthsToMark, screenshot: screenshot,
+    });
     const next = Object.assign({}, payments);
-    for (let i = 0; i < monthsToMark.length; i++) {
-      const mk = monthsToMark[i];
-      const res = await sb.from('payments')
-        .upsert({ member_id: memberId, month: mk, paid: true, screenshot: screenshot, paid_at: now },
-          { onConflict: 'member_id,month' }).select().single();
-      if (!res.error) next[memberId + '_' + mk] = res.data;
+    if (!res.error && res.payments) {
+      res.payments.forEach(function(p) { next[memberId + '_' + p.month] = p; });
     }
     setPayments(next);
     setSaving(false);
@@ -613,6 +602,7 @@ function App() {
   function handleLogout() {
     if (!window.confirm('Log out of this register on this device? You can log back in anytime with your UPI ID and PIN.')) return;
     localStorage.removeItem('tutor_id');
+    localStorage.removeItem('session_token');
     setTutorId(null);
     setProfile(null);
     setMembers([]);
@@ -631,9 +621,12 @@ function App() {
   // UPI app QR code) — passing null clears it, so removing the photo in
   // Edit Profile actually removes it here rather than leaving the old one.
   async function updateProfile(name, upi, phone, email, upiMobile, qrImage) {
-    const res = await sb.from('tutors').update({ name: name, upi_id: upi, phone_number: phone ? phone : null, email: email ? email : null, upi_mobile: upiMobile ? upiMobile : null, upi_qr_image: qrImage ? qrImage : null }).eq('id', tutorId).select().single();
-    if (res.error) return res.error.message || 'Could not update profile.';
-    setProfile(res.data);
+    const res = await callApi('update_profile', {
+      tutor_id: tutorId, session_token: localStorage.getItem('session_token'),
+      name: name, upi: upi, phone: phone, email: email, upi_mobile: upiMobile, qr_image: qrImage,
+    });
+    if (res.error) return res.error;
+    setProfile(res.tutor);
     setEditingProfile(false);
     return null;
   }
@@ -646,7 +639,10 @@ function App() {
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
   }
   async function unmarkPaid(memberId, mk) {
-    await sb.from('payments').delete().eq('member_id', memberId).eq('month', mk);
+    await callApi('unmark_paid', {
+      tutor_id: tutorId, session_token: localStorage.getItem('session_token'),
+      member_id: memberId, month: mk,
+    });
     const next = Object.assign({}, payments);
     delete next[memberId + '_' + mk];
     setPayments(next);
