@@ -167,12 +167,18 @@ const SAMPLE_MEMBER = {
 // When the tutor hasn't added a UPI ID yet (it's optional at signup),
 // this shows an honest placeholder instead of a fake or broken link.
 function buildSampleReminderMessage(tutorName, upiId) {
+  // CHANGED: matches the real link sendReminder() now sends (a normal
+  // https://tuitionkhata.in/pay.html link, not a raw upi://pay link) —
+  // this preview used the old, now-fixed format, which would have shown
+  // a new tutor a message that no longer matches what actually gets
+  // sent. See sendReminder()'s comment for why the raw link was dropped:
+  // WhatsApp shows it as plain, un-tappable text for whoever receives it.
   const payLine = (upiId && upiId.trim().length > 0)
-    ? ('upi://pay?pa=' + upiId.trim() + '&pn=' + encodeURIComponent(tutorName) + '&am=' + SAMPLE_MEMBER.fee + '&cu=INR&tn=Tuition%20fee')
+    ? ('https://tuitionkhata.in/pay.html?upi=' + encodeURIComponent(upiId.trim()) + '&name=' + encodeURIComponent(tutorName) + '&amount=' + SAMPLE_MEMBER.fee)
     : '[Your payment link will appear here once you add your UPI ID — tap Edit Profile]';
   return "Hi! This is a reminder for " + SAMPLE_MEMBER.name + "'s tuition fee.\n\nFrom: " + tutorName + "\nPending: " + monthLabel(monthKey(new Date())) +
     "\nTotal due: Rs." + SAMPLE_MEMBER.fee +
-    "\n\nPay here: " + payLine + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + tutorName + " via Tuition Khata";
+    "\n\nPay here: " + payLine + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + tutorName;
 }
 function compressImage(file) {
   return new Promise((resolve, reject) => {
@@ -526,11 +532,14 @@ function App() {
       : '';
     const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
       "\nTotal due: Rs." + total + breakdown +
-      // CHANGED (per Neeraj): was "— sent via Tuition Khata" — added the
-      // tutor's own name so the closing line reads as "this message was
-      // sent by your tutor, using this tool" rather than just naming the
-      // tool alone, which is clearer about who it's actually from.
-      "\n\nPay here: " + payLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + profile.name + " via Tuition Khata";
+      // CHANGED (per Neeraj): dropped "via Tuition Khata" from the
+      // closing line — the message now names only the tutor, not the
+      // app. The payment link itself still shows the tuitionkhata.in
+      // domain (see the comment above buildPayPageUrl() call above) —
+      // that part stays, since it's what makes the link real and
+      // tappable rather than just removing the name from one spot
+      // while leaving it in the actual working part of the message.
+      "\n\nPay here: " + payLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + profile.name;
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
@@ -632,7 +641,7 @@ function App() {
   function sendReceipt(member, mk, payment) {
     const msg = "✅ Payment Received\n\nTutor: " + profile.name + "\nStudent: " + member.name + "\nMonth: " + monthLabel(mk) +
       "\nAmount: Rs." + member.fee + "\nReceived on: " + formatDate(payment.paid_at) +
-      "\n\nThank you!\n— " + profile.name + " (via Tuition Khata)";
+      "\n\nThank you!\n— " + profile.name;
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
