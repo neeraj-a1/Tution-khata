@@ -39,6 +39,23 @@
     }
   }
 </script>
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '1418734930159062');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=1418734930159062&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Meta Pixel Code -->
 </head>
 <body>
 <div id="root"></div>
@@ -323,6 +340,23 @@ function App() {
   // visit.
   async function createTutor(name, upi, pin, phone, email, upiMobile, qrImage) {
     setSaving(true);
+    // NEW: refuse to create a second account on top of one that already
+    // has this UPI ID or this WhatsApp number. Without this check, a
+    // tutor signing up twice (for example after losing track of
+    // whether they already had an account) silently got two separate,
+    // unconnected registers — and recovering either one afterwards
+    // failed outright, because Supabase errors out when a recovery
+    // lookup matches more than one row instead of picking one.
+    if (upi && upi.trim()) {
+      const dupUpi = await sb.from('tutors').select('id').eq('upi_id', upi.trim()).limit(1);
+      if (dupUpi.error) { setSaving(false); return 'Something went wrong. Please try again.'; }
+      if (dupUpi.data && dupUpi.data.length) { setSaving(false); return 'An account with this UPI ID already exists. Use "Recover Account" instead of signing up again.'; }
+    }
+    if (phone && phone.trim()) {
+      const dupPhone = await sb.from('tutors').select('id').eq('phone_number', phone.trim()).limit(1);
+      if (dupPhone.error) { setSaving(false); return 'Something went wrong. Please try again.'; }
+      if (dupPhone.data && dupPhone.data.length) { setSaving(false); return 'An account with this WhatsApp number already exists. Use "Recover Account" instead of signing up again.'; }
+    }
     // NEW: attaches whichever source link this visitor arrived on (set
     // by the useEffect above), so signups can later be grouped by which
     // Facebook group / ad / post actually brought them in. null for a
@@ -331,7 +365,15 @@ function App() {
     let signupSource = null;
     try { signupSource = localStorage.getItem('signup_source') || null; } catch (e) {}
     const res = await sb.from('tutors').insert({ name: name, upi_id: upi, recovery_pin: pin, phone_number: phone, email: email || null, upi_mobile: upiMobile ? upiMobile : null, upi_qr_image: qrImage ? qrImage : null, signup_source: signupSource }).select().single();
-    if (res.error) { setSaving(false); return res.error.message || 'Could not create your register.'; }
+    if (res.error) {
+      // NEW: if a database-level uniqueness rule catches a duplicate
+      // that this check above missed (for example a race between two
+      // near-simultaneous signups), show the same plain-language
+      // message instead of a raw database error.
+      if (res.error.code === '23505') { setSaving(false); return 'An account with this UPI ID or WhatsApp number already exists. Use "Recover Account" instead of signing up again.'; }
+      setSaving(false); return res.error.message || 'Could not create your register.';
+    }
+    if (typeof fbq === 'function') { fbq('track', 'CompleteRegistration'); }
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     setProfile(res.data);
@@ -346,16 +388,24 @@ function App() {
   // exactly as before; nothing breaks for them.
   async function recoverAccount(identifier, pin) {
     const val = identifier.trim();
+    // CHANGED: was .maybeSingle(), which throws an error (rather than
+    // just returning nothing useful) if more than one row matches —
+    // which is exactly what happens for an account that got duplicated
+    // by the signup bug above. Taking the oldest matching account
+    // instead means recovery still works for anyone caught by that
+    // bug, rather than failing with "Something went wrong."
     const res = await sb.from('tutors')
       .select('*')
       .or('upi_id.eq.' + val + ',phone_number.eq.' + val)
       .eq('recovery_pin', pin.trim())
-      .maybeSingle();
+      .order('created_at', { ascending: true })
+      .limit(1);
     if (res.error) return 'Something went wrong. Please try again.';
-    if (!res.data) return 'No matching account found. Check your UPI ID (or WhatsApp number) and PIN are exactly right.';
-    localStorage.setItem('tutor_id', res.data.id);
-    setTutorId(res.data.id);
-    await loadData(res.data.id);
+    if (!res.data || !res.data.length) return 'No matching account found. Check your UPI ID (or WhatsApp number) and PIN are exactly right.';
+    const row = res.data[0];
+    localStorage.setItem('tutor_id', row.id);
+    setTutorId(row.id);
+    await loadData(row.id);
     return null;
   }
   // NEW: lets a tutor who forgot their PIN get back in without it, by
@@ -365,14 +415,28 @@ function App() {
   // exist.) Anyone who signed up before the phone number field existed
   // won't have one on file, so this won't find a match for them.
   async function resetPin(name, phone, newPin) {
-    const res = await sb.from('tutors')
-      .update({ recovery_pin: newPin })
+    // CHANGED: this used to run the PIN update directly against the
+    // name+phone filter. If two tutors ever shared the same name and
+    // phone number, that update would silently change BOTH of their
+    // PINs at once (Postgres updates every row a filter matches), and
+    // then .maybeSingle() would error trying to hand back more than
+    // one updated row. Looking the account up first, and updating only
+    // that one row by its id, makes this safe even if a name+phone
+    // pair is ever shared.
+    const lookup = await sb.from('tutors')
+      .select('id')
       .ilike('name', name.trim())
       .eq('phone_number', phone.trim())
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (lookup.error) return 'Something went wrong. Please try again.';
+    if (!lookup.data || !lookup.data.length) return 'No matching account found. Double-check your name and WhatsApp number are exactly right — or if you signed up a while ago, you may not have a WhatsApp number on file yet, in which case this won’t work and you’ll need help resetting it manually.';
+    const res = await sb.from('tutors')
+      .update({ recovery_pin: newPin })
+      .eq('id', lookup.data[0].id)
       .select()
       .maybeSingle();
     if (res.error) return 'Something went wrong. Please try again.';
-    if (!res.data) return 'No matching account found. Double-check your name and WhatsApp number are exactly right — or if you signed up a while ago, you may not have a WhatsApp number on file yet, in which case this won’t work and you’ll need help resetting it manually.';
     localStorage.setItem('tutor_id', res.data.id);
     setTutorId(res.data.id);
     await loadData(res.data.id);
