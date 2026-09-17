@@ -503,43 +503,84 @@ function App() {
     return 'https://tuitionkhata.in/pay.html?' + params.toString();
   }
   function sendReminder(member) {
-    // NEW: UPI ID is now optional at signup, so it may be missing here.
-    // Without it, buildPayPageUrl() would produce a broken payment link —
-    // catch that before opening WhatsApp with something unusable.
-    if (!profile.upi_id || profile.upi_id.trim().length === 0) {
-      alert('Add your UPI ID first (tap Edit Profile) so this reminder includes a working payment link.');
-      return;
-    }
     const outstanding = outstandingMonths(member, payments);
     if (outstanding.length === 0) return;
     const total = outstanding.length * Number(member.fee);
     const monthsList = outstanding.map(monthLabel).join(', ');
-    // FIXED (per Neeraj, confirmed by testing): the raw "upi://pay?..."
-    // link used here before was never actually tappable for a parent
-    // receiving the message — WhatsApp only turns real http/https web
-    // links into a clickable blue link, and silently leaves a upi://
-    // link as plain, un-clickable text. That's a bigger problem than
-    // the desktop-only gap this was originally weighed against (see
-    // buildPayPageUrl()'s comment above) — the raw link didn't reliably
-    // work on phones either, which defeats the entire point of sending
-    // a reminder. Switched to the https://tuitionkhata.in/pay.html link
-    // instead, which WhatsApp does turn into a real tappable link, and
-    // which still opens the UPI app directly on a phone (it's a normal
-    // page with a "tap to pay" button, not a dead end).
-    const payLink = buildPayPageUrl(total);
     const breakdown = outstanding.length > 1
       ? ' (' + outstanding.length + ' months × Rs.' + member.fee + ')'
       : '';
-    const msg = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
-      "\nTotal due: Rs." + total + breakdown +
-      // CHANGED (per Neeraj): dropped "via Tuition Khata" from the
-      // closing line — the message now names only the tutor, not the
-      // app. The payment link itself still shows the tuitionkhata.in
-      // domain (see the comment above buildPayPageUrl() call above) —
-      // that part stays, since it's what makes the link real and
-      // tappable rather than just removing the name from one spot
-      // while leaving it in the actual working part of the message.
-      "\n\nPay here: " + payLink + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + profile.name;
+    const header = "Hi! This is a reminder for " + member.name + "'s tuition fee.\n\nFrom: " + profile.name + "\nPending: " + monthsList +
+      "\nTotal due: Rs." + total + breakdown;
+    // CHANGED (per Neeraj): UPI ID, UPI-linked mobile number, and QR
+    // photo are now three independent, combinable payment options — a
+    // tutor can have any mix of the three (or none at all), and every
+    // one they've actually filled in gets its own line in the message.
+    // Sending a reminder no longer requires any of them, so a tutor who
+    // is hesitant to hand over a UPI ID (or doesn't use UPI at all) can
+    // still use the app for reminders and the paid/unpaid tracking
+    // below, which already works the same regardless of how a student's
+    // family actually pays.
+    const hasUpi = profile.upi_id && profile.upi_id.trim().length > 0;
+    const hasUpiMobile = profile.upi_mobile && profile.upi_mobile.trim().length > 0;
+    const hasQrPhoto = profile.upi_qr_image && profile.upi_qr_image.trim().length > 0;
+    const payLines = [];
+    if (hasUpi) {
+      // FIXED (per Neeraj, confirmed by testing): the raw "upi://pay?..."
+      // link used here before was never actually tappable for a parent
+      // receiving the message — WhatsApp only turns real http/https web
+      // links into a clickable blue link, and silently leaves a upi://
+      // link as plain, un-clickable text. Switched to the
+      // https://tuitionkhata.in/pay.html link instead, which WhatsApp
+      // does turn into a real tappable link, and which still opens the
+      // UPI app directly on a phone (it's a normal page with a "tap to
+      // pay" button, not a dead end). That page already shows the UPI
+      // mobile number too (if set), so it isn't repeated as its own line
+      // here when a UPI ID is also present — that would just say the
+      // same thing twice.
+      payLines.push("Pay here: " + buildPayPageUrl(total));
+    }
+    if (hasUpiMobile && !hasUpi) {
+      // Only spelled out as raw text here when there's no pay.html link
+      // to carry it (see the note just above) — and deliberately just a
+      // plain number to copy, not a QR code or tap-to-pay link. A UPI
+      // deep link built from a bare mobile number instead of a real UPI
+      // ID isn't reliably honored by every bank/app, so promising a
+      // working "tap to pay" button here would risk a parent's payment
+      // silently failing. "If their UPI app supports it" (also said in
+      // the in-app QR popup) is the honest version of this.
+      payLines.push("Or pay via UPI to this mobile number (if your UPI app supports paying by mobile number): +91 " + profile.upi_mobile.trim());
+    }
+    if (hasQrPhoto) {
+      // The tutor has uploaded a photo of their own QR code. This app
+      // cannot attach that photo to the WhatsApp message on its own —
+      // WhatsApp's "open chat with prefilled text" link only ever fills
+      // in text, never a file, for any app; that's a fixed WhatsApp
+      // restriction, not something to be fixed here. So the message
+      // tells the parent to expect the photo separately, and the alert()
+      // right before WhatsApp opens (below) reminds the tutor to attach
+      // it by hand in the same chat, or use the new "Share QR photo"
+      // button instead (see shareQrImage()) which can send it as a real
+      // attachment in one extra tap on a phone.
+      payLines.push("I'm also sending my payment QR code as a photo in this chat — scan it and enter Rs." + total + " to pay.");
+    }
+    let msg;
+    if (payLines.length > 0) {
+      msg = header +
+        // CHANGED (per Neeraj): dropped "via Tuition Khata" from the
+        // closing line — the message now names only the tutor, not the
+        // app.
+        "\n\n" + payLines.join("\n\n") + "\n\nKindly share a screenshot after payment for our records. Thank you!\n\n— sent from " + profile.name;
+    } else {
+      // No UPI ID, mobile number, or QR photo on file — a plain reminder
+      // with no payment info at all, for a tutor who takes cash or bank
+      // transfer and never wants to set up UPI in this app.
+      msg = header +
+        "\n\nPlease make this payment by your usual method and let me know once it's done. Thank you!\n\n— sent from " + profile.name;
+    }
+    if (hasQrPhoto) {
+      alert("WhatsApp will open with the message ready. Before you tap send, also attach your QR code photo in the same chat (use the 📎 attach icon and pick it from your photos), or close WhatsApp without sending and use the \"Share QR photo\" button instead — this app can't attach it to this message automatically.");
+    }
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
     window.open('https://wa.me/' + waPhone + '?text=' + encodeURIComponent(msg), '_blank');
@@ -557,14 +598,57 @@ function App() {
       callApi('mark_reminder_sent', { tutor_id: tutorId, session_token: localStorage.getItem('session_token') });
     }
   }
-  // NEW: opens the in-app payment QR popup for a member, with the same
-  // missing-UPI-ID guard as sendReminder() above.
+  // NEW: opens the in-app payment QR popup for a member. Unlike
+  // sendReminder() above (which always sends something, even with no
+  // payment info on file), this one has nothing useful to show at all
+  // with none of the three options set, so it still guards on that.
   function openQr(member) {
-    if (!profile.upi_id || profile.upi_id.trim().length === 0) {
-      alert('Add your UPI ID first (tap Edit Profile) so this shows a working QR code.');
+    // CHANGED (per Neeraj): a working payment option here no longer
+    // requires a UPI ID specifically — an uploaded QR photo, or a UPI
+    // mobile number on its own, are both valid alternatives. Only block
+    // if the tutor has given none of the three.
+    const hasUpi = profile.upi_id && profile.upi_id.trim().length > 0;
+    const hasUpiMobile = profile.upi_mobile && profile.upi_mobile.trim().length > 0;
+    const hasQrPhoto = profile.upi_qr_image && profile.upi_qr_image.trim().length > 0;
+    if (!hasUpi && !hasUpiMobile && !hasQrPhoto) {
+      alert('Add your UPI ID, mobile number, or a photo of your QR code first (tap Edit Profile) so this shows a working payment option.');
       return;
     }
     setQrFor(member.id);
+  }
+  // NEW: shares the tutor's uploaded QR code photo as a real image file
+  // — via the device's native share sheet — rather than requiring them
+  // to save it and attach it by hand inside WhatsApp. This is as close
+  // to "one tap" as a web app can get for sending an actual photo into a
+  // WhatsApp chat: WhatsApp itself gives no way for a website to attach
+  // a file to a pre-filled message (see the note in sendReminder()), but
+  // the phone's own share sheet can hand a file to WhatsApp directly,
+  // because that goes through the operating system rather than through
+  // WhatsApp's own link format. Only works where the browser supports
+  // the Web Share API with files (most Android/iPhone browsers; not most
+  // desktop browsers) — falls back to just opening the photo so it can
+  // be saved and attached manually, same as before this existed.
+  async function shareQrImage(member) {
+    const hasQrPhoto = profile.upi_qr_image && profile.upi_qr_image.trim().length > 0;
+    if (!hasQrPhoto) return;
+    const caption = member
+      ? ("Scan to pay " + profile.name + "'s tuition fee for " + member.name + (member.fee ? (" — Rs." + member.fee) : ''))
+      : ("Scan to pay " + profile.name);
+    try {
+      const res = await fetch(profile.upi_qr_image);
+      const blob = await res.blob();
+      const file = new File([blob], 'payment-qr.jpg', { type: blob.type || 'image/jpeg' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Payment QR code', text: caption });
+        return;
+      }
+    } catch (e) {
+      // A cancelled share (user backed out of the share sheet) also
+      // lands here — fall through to the manual fallback below only if
+      // it wasn't just a cancel.
+      if (e && e.name === 'AbortError') return;
+    }
+    window.open(profile.upi_qr_image, '_blank');
   }
   async function handleMarkPaid(memberId, monthsToMark, file) {
     setSaving(true);
@@ -786,8 +870,15 @@ function App() {
         // NEW: shows a scannable UPI QR code for this student's due
         // amount — for showing on screen in person, or for a parent
         // scanning off a laptop where "Remind on WhatsApp" isn't handy.
+        // CHANGED (per Neeraj): added a second button next to it, only
+        // when a QR photo is on file, that sends that photo straight to
+        // WhatsApp via the phone's share sheet — no need to open the
+        // popup above first just to get to the photo.
         outstanding.length > 0
-          ? h('button', { onClick: () => openQr(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'w-full border border-dashed rounded-md py-1.5 text-xs font-medium mb-3' }, '▦ Show payment QR')
+          ? h('div', { className: 'flex gap-2 mb-3' },
+              h('button', { onClick: () => openQr(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'flex-1 border border-dashed rounded-md py-1.5 text-xs font-medium' }, '▦ Show payment QR'),
+              profile.upi_qr_image ? h('button', { onClick: () => shareQrImage(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'flex-1 border border-dashed rounded-md py-1.5 text-xs font-medium' }, '📤 Share QR photo') : null
+            )
           : null,
         h('button', {
           onClick: () => setExpandedHistory(isExpanded ? null : m.id),
@@ -987,6 +1078,7 @@ function App() {
       upiLink: buildUpiLink(qrMember, qrAmount),
       payPageUrl: buildPayPageUrl(qrAmount),
       onClose: () => setQrFor(null),
+      onShare: () => shareQrImage(qrMember),
       colors: COLORS
     }) : null,
     // NEW: shown once, right after the tutor's first student is added.
@@ -1147,10 +1239,10 @@ function Onboarding(props) {
   // optional payment fields sitting between "name" and the one number
   // that's actually required, the form looked cluttered and made it easy
   // to mix up "UPI-linked mobile number" with "your WhatsApp number".
-  // They're still fully available — just only in Edit Profile now, and
-  // sendReminder() already prompts for a UPI ID at the one moment it's
-  // actually needed (sending the first reminder), so nothing is lost by
-  // not asking for it up front.
+  // They're still fully available — just only in Edit Profile now. None
+  // of the three is actually required to send a reminder at all anymore
+  // (see sendReminder()), so nothing is lost by not asking for any of
+  // them up front.
   const [setupError, setSetupError] = useState('');
   const [recoverUpi, setRecoverUpi] = useState('');
   const [recoverPin, setRecoverPin] = useState('');
@@ -1178,12 +1270,12 @@ function Onboarding(props) {
   const pinValid = /^\d{5}$/.test(pin);
   const phoneValid = /^\d{10}$/.test(phone);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  // CHANGED: UPI ID is no longer required to sign up — it's only needed
-  // once a tutor actually sends a payment reminder (sendReminder checks
-  // for it then, and prompts them to add it via Edit Profile if it's
-  // still missing). Signing up now only needs name, PIN, and phone.
-  // Email is optional too, but if they do type one, it has to look
-  // like a real email before it's accepted.
+  // CHANGED: UPI ID is not required to sign up, and — per Neeraj — is not
+  // required at all anymore. sendReminder() now sends a working reminder
+  // whether a tutor has a UPI ID, only an uploaded QR code photo, or
+  // neither at all (plain text, no payment link). Signing up now only
+  // needs name, PIN, and phone. Email is optional too, but if they do
+  // type one, it has to look like a real email before it's accepted.
   const canSave = name.trim().length > 1 && pinValid && phoneValid && (email.length === 0 || emailValid);
   const recoverPinValid = /^\d{5}$/.test(recoverPin);
   // CHANGED: since UPI ID can now be blank for many tutors, matching on
@@ -1575,7 +1667,8 @@ function ProfileEditModal(props) {
 // service, so no payment details ever leave the browser to generate it.
 function PaymentQrModal(props) {
   const member = props.member, amount = props.amount, upiId = props.upiId, upiMobile = props.upiMobile,
-        upiQrImage = props.upiQrImage, upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose, colors = props.colors;
+        upiQrImage = props.upiQrImage, upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose,
+        onShare = props.onShare, colors = props.colors;
   const canvasRef = useRef(null);
   const [copied, setCopied] = useState('');
   useEffect(() => {
@@ -1602,36 +1695,57 @@ function PaymentQrModal(props) {
         h('p', { style: { fontFamily: "'Arvo', serif" }, className: 'font-bold' }, member.name + "'s payment"),
         h('button', { onClick: onClose }, '✕')
       ),
+      // Amount is shown once, up top, regardless of which payment
+      // option(s) below are actually available.
       h('div', { className: 'text-center mb-3' },
-        h('div', { ref: canvasRef, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border, width: '222px', height: '222px' } }),
-        h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium mt-2' }, '₹' + Number(amount).toLocaleString('en-IN')),
-        h('p', { style: { color: colors.inkSoft }, className: 'text-xs' }, 'Scan with any UPI app to pay this amount.')
+        h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-lg font-medium' }, '₹' + Number(amount).toLocaleString('en-IN'))
       ),
-      h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2' },
+      // CHANGED (per Neeraj): the auto-generated, amount-aware QR (and
+      // the UPI ID / mobile-number rows below it) only render when the
+      // tutor actually has a UPI ID — without one there's nothing valid
+      // to encode into this QR or show as an ID, and this used to render
+      // anyway with blank/broken values.
+      upiId ? h('div', { className: 'text-center mb-3' },
+        h('div', { ref: canvasRef, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border, width: '222px', height: '222px' } }),
+        h('p', { style: { color: colors.inkSoft }, className: 'text-xs mt-2' }, 'Scan with any UPI app to pay this amount.')
+      ) : null,
+      upiId ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2' },
         h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, 'UPI ID'),
         h('div', { className: 'flex items-center justify-between gap-2' },
           h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm break-all' }, upiId),
           h('button', { onClick: () => copy('upi', upiId), style: { color: colors.inkSoft }, className: 'text-xs hover:underline shrink-0' }, copied === 'upi' ? 'Copied' : 'Copy')
         )
-      ),
-      // NEW: only shown if the tutor has actually added one — see the
-      // note in Edit Profile on why this is opt-in.
+      ) : null,
+      // CHANGED (per Neeraj): shown whenever the tutor has added one —
+      // no longer tied to also having a UPI ID, since this is now a
+      // standalone third payment option, not just an addition to the
+      // first. Label adjusts depending on whether it's an alternative to
+      // something above it or the only option available.
       upiMobile ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2' },
-        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, 'Or pay to this mobile number (if their UPI app supports it)'),
+        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, upiId ? 'Or pay to this mobile number (if their UPI app supports it)' : 'Pay via UPI to this mobile number (if their UPI app supports it)'),
         h('div', { className: 'flex items-center justify-between gap-2' },
           h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm' }, '+91 ' + upiMobile),
           h('button', { onClick: () => copy('mobile', upiMobile), style: { color: colors.inkSoft }, className: 'text-xs hover:underline shrink-0' }, copied === 'mobile' ? 'Copied' : 'Copy')
         )
       ) : null,
-      // NEW: only shown if the tutor has uploaded their own QR code
-      // photo — a second, separate way to pay besides the auto-generated
-      // QR above. Unlike the QR above, this is just a picture, so it
-      // can't carry the amount — the note says as much.
+      // CHANGED (per Neeraj): the tutor's own uploaded QR code photo — a
+      // second, separate way to pay besides the auto-generated QR above,
+      // or now the ONLY way shown here for a tutor who has this photo
+      // but no UPI ID on file. Unlike the auto-generated QR, this is
+      // just a picture, so it can't carry the amount — the label says as
+      // much either way, worded depending on whether it's the only
+      // option or an alternative to the one above it.
       upiQrImage ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2 text-center' },
-        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px] mb-2' }, 'Or scan this QR code instead (amount must be entered by hand)'),
-        h('img', { src: upiQrImage, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border, width: '160px', height: '160px', objectFit: 'contain' } })
+        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px] mb-2' }, upiId ? 'Or scan this QR code instead (amount must be entered by hand)' : 'Scan this QR code to pay (enter the amount above by hand)'),
+        h('img', { src: upiQrImage, className: 'mx-auto rounded-lg border mb-2', style: { borderColor: colors.border, width: '160px', height: '160px', objectFit: 'contain' } }),
+        // NEW: sends this same photo as a real WhatsApp attachment via
+        // the phone's share sheet, in one tap, instead of the parent
+        // only ever seeing it as a small preview inside this popup — see
+        // shareQrImage() for why this needs the share sheet rather than
+        // just a WhatsApp link.
+        onShare ? h('button', { onClick: onShare, style: { borderColor: colors.border, color: colors.inkSoft }, className: 'text-xs border rounded-md px-3 py-1.5 hover:underline' }, '📤 Share this photo') : null
       ) : null,
-      h('a', { href: payPageUrl, target: '_blank', rel: 'noopener', style: { color: colors.inkSoft }, className: 'text-xs hover:underline block mt-1 text-center' }, 'Open as a shareable link ↗')
+      upiId ? h('a', { href: payPageUrl, target: '_blank', rel: 'noopener', style: { color: colors.inkSoft }, className: 'text-xs hover:underline block mt-1 text-center' }, 'Open as a shareable link ↗') : null
     )
   );
 }
