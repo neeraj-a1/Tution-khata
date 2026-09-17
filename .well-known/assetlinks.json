@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "in.tuitionkhata.twa",
+        "sha256_cert_fingerprints": ["AE:DD:3A:F6:8B:0D:86:98:23:42:82:43:5F:97:0A:A3:67:4B:9B:03:97:BC:EF:DC:6C:6F:77:E7:C8:70:2E:5B"]
+      }
+    }]
