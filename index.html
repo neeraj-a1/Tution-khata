@@ -557,11 +557,10 @@ function App() {
       // WhatsApp's "open chat with prefilled text" link only ever fills
       // in text, never a file, for any app; that's a fixed WhatsApp
       // restriction, not something to be fixed here. So the message
-      // tells the parent to expect the photo separately, and the alert()
-      // right before WhatsApp opens (below) reminds the tutor to attach
-      // it by hand in the same chat, or use the new "Share QR photo"
-      // button instead (see shareQrImage()) which can send it as a real
-      // attachment in one extra tap on a phone.
+      // tells the parent to expect the photo separately, and — only when
+      // there's no UPI ID already giving a fully working link (see the
+      // alert() below) — a reminder tells the tutor to attach it by hand
+      // in the very same chat this wa.me link already opens.
       payLines.push("I'm also sending my payment QR code as a photo in this chat — scan it and enter Rs." + total + " to pay.");
     }
     let msg;
@@ -578,8 +577,13 @@ function App() {
       msg = header +
         "\n\nPlease make this payment by your usual method and let me know once it's done. Thank you!\n\n— sent from " + profile.name;
     }
-    if (hasQrPhoto) {
-      alert("WhatsApp will open with the message ready. Before you tap send, also attach your QR code photo in the same chat (use the 📎 attach icon and pick it from your photos), or close WhatsApp without sending and use the \"Share QR photo\" button instead — this app can't attach it to this message automatically.");
+    // CHANGED (per Neeraj): only nag about attaching the photo when it's
+    // actually the thing making this reminder work — if a UPI ID is
+    // already set, the message already has a fully working pay link, so
+    // the QR photo is just a bonus, not worth interrupting every single
+    // reminder for.
+    if (hasQrPhoto && !hasUpi) {
+      alert("WhatsApp will open with the message ready. Before you tap send, also attach your QR code photo in the same chat (use the 📎 attach icon and pick it from your photos) — this app can't attach it to this message automatically.");
     }
     const digits = member.phone.replace(/\D/g, '');
     const waPhone = digits.length === 10 ? '91' + digits : digits;
@@ -616,40 +620,21 @@ function App() {
     }
     setQrFor(member.id);
   }
-  // NEW: shares the tutor's uploaded QR code photo as a real image file
-  // — via the device's native share sheet — rather than requiring them
-  // to save it and attach it by hand inside WhatsApp. This is as close
-  // to "one tap" as a web app can get for sending an actual photo into a
-  // WhatsApp chat: WhatsApp itself gives no way for a website to attach
-  // a file to a pre-filled message (see the note in sendReminder()), but
-  // the phone's own share sheet can hand a file to WhatsApp directly,
-  // because that goes through the operating system rather than through
-  // WhatsApp's own link format. Only works where the browser supports
-  // the Web Share API with files (most Android/iPhone browsers; not most
-  // desktop browsers) — falls back to just opening the photo so it can
-  // be saved and attached manually, same as before this existed.
-  async function shareQrImage(member) {
-    const hasQrPhoto = profile.upi_qr_image && profile.upi_qr_image.trim().length > 0;
-    if (!hasQrPhoto) return;
-    const caption = member
-      ? ("Scan to pay " + profile.name + "'s tuition fee for " + member.name + (member.fee ? (" — Rs." + member.fee) : ''))
-      : ("Scan to pay " + profile.name);
-    try {
-      const res = await fetch(profile.upi_qr_image);
-      const blob = await res.blob();
-      const file = new File([blob], 'payment-qr.jpg', { type: blob.type || 'image/jpeg' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'Payment QR code', text: caption });
-        return;
-      }
-    } catch (e) {
-      // A cancelled share (user backed out of the share sheet) also
-      // lands here — fall through to the manual fallback below only if
-      // it wasn't just a cancel.
-      if (e && e.name === 'AbortError') return;
-    }
-    window.open(profile.upi_qr_image, '_blank');
-  }
+  // REMOVED (per Neeraj, tested and found unsatisfactory): a
+  // shareQrImage() using the Web Share API used to live here. It could
+  // hand the QR photo to WhatsApp as a real attachment, but only by
+  // opening the phone's generic share sheet, which drops the tutor at
+  // "pick an app, then pick a contact" — it could not jump straight to
+  // one specific parent's chat the way the wa.me link in sendReminder()
+  // does. No website can do that for a media file: WhatsApp's click-to-
+  // chat links (wa.me / whatsapp://send) only ever pre-fill text for a
+  // specific chat, never a file, for any app — attaching a file to a
+  // specific chat automatically is only possible through WhatsApp's own
+  // paid Business API, not a plain web page. So the reminder message
+  // plus a manual attach (see the alert() in sendReminder(), only shown
+  // when there's no UPI ID already giving a working link) is the
+  // reliable path: it's one extra manual tap, but it happens inside the
+  // correct parent's chat, which the wa.me link already opened.
   async function handleMarkPaid(memberId, monthsToMark, file) {
     setSaving(true);
     let screenshot = null;
@@ -870,15 +855,8 @@ function App() {
         // NEW: shows a scannable UPI QR code for this student's due
         // amount — for showing on screen in person, or for a parent
         // scanning off a laptop where "Remind on WhatsApp" isn't handy.
-        // CHANGED (per Neeraj): added a second button next to it, only
-        // when a QR photo is on file, that sends that photo straight to
-        // WhatsApp via the phone's share sheet — no need to open the
-        // popup above first just to get to the photo.
         outstanding.length > 0
-          ? h('div', { className: 'flex gap-2 mb-3' },
-              h('button', { onClick: () => openQr(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'flex-1 border border-dashed rounded-md py-1.5 text-xs font-medium' }, '▦ Show payment QR'),
-              profile.upi_qr_image ? h('button', { onClick: () => shareQrImage(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'flex-1 border border-dashed rounded-md py-1.5 text-xs font-medium' }, '📤 Share QR photo') : null
-            )
+          ? h('button', { onClick: () => openQr(m), style: { borderColor: COLORS.border, color: COLORS.inkSoft }, className: 'w-full border border-dashed rounded-md py-1.5 text-xs font-medium mb-3' }, '▦ Show payment QR')
           : null,
         h('button', {
           onClick: () => setExpandedHistory(isExpanded ? null : m.id),
@@ -1078,7 +1056,6 @@ function App() {
       upiLink: buildUpiLink(qrMember, qrAmount),
       payPageUrl: buildPayPageUrl(qrAmount),
       onClose: () => setQrFor(null),
-      onShare: () => shareQrImage(qrMember),
       colors: COLORS
     }) : null,
     // NEW: shown once, right after the tutor's first student is added.
@@ -1667,8 +1644,7 @@ function ProfileEditModal(props) {
 // service, so no payment details ever leave the browser to generate it.
 function PaymentQrModal(props) {
   const member = props.member, amount = props.amount, upiId = props.upiId, upiMobile = props.upiMobile,
-        upiQrImage = props.upiQrImage, upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose,
-        onShare = props.onShare, colors = props.colors;
+        upiQrImage = props.upiQrImage, upiLink = props.upiLink, payPageUrl = props.payPageUrl, onClose = props.onClose, colors = props.colors;
   const canvasRef = useRef(null);
   const [copied, setCopied] = useState('');
   useEffect(() => {
@@ -1737,13 +1713,7 @@ function PaymentQrModal(props) {
       // option or an alternative to the one above it.
       upiQrImage ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2 text-center' },
         h('p', { style: { color: colors.inkSoft }, className: 'text-[11px] mb-2' }, upiId ? 'Or scan this QR code instead (amount must be entered by hand)' : 'Scan this QR code to pay (enter the amount above by hand)'),
-        h('img', { src: upiQrImage, className: 'mx-auto rounded-lg border mb-2', style: { borderColor: colors.border, width: '160px', height: '160px', objectFit: 'contain' } }),
-        // NEW: sends this same photo as a real WhatsApp attachment via
-        // the phone's share sheet, in one tap, instead of the parent
-        // only ever seeing it as a small preview inside this popup — see
-        // shareQrImage() for why this needs the share sheet rather than
-        // just a WhatsApp link.
-        onShare ? h('button', { onClick: onShare, style: { borderColor: colors.border, color: colors.inkSoft }, className: 'text-xs border rounded-md px-3 py-1.5 hover:underline' }, '📤 Share this photo') : null
+        h('img', { src: upiQrImage, className: 'mx-auto rounded-lg border', style: { borderColor: colors.border, width: '160px', height: '160px', objectFit: 'contain' } })
       ) : null,
       upiId ? h('a', { href: payPageUrl, target: '_blank', rel: 'noopener', style: { color: colors.inkSoft }, className: 'text-xs hover:underline block mt-1 text-center' }, 'Open as a shareable link ↗') : null
     )
