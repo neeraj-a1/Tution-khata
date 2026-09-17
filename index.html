@@ -543,13 +543,18 @@ function App() {
     if (hasUpiMobile && !hasUpi) {
       // Only spelled out as raw text here when there's no pay.html link
       // to carry it (see the note just above) — and deliberately just a
-      // plain number to copy, not a QR code or tap-to-pay link. A UPI
-      // deep link built from a bare mobile number instead of a real UPI
-      // ID isn't reliably honored by every bank/app, so promising a
-      // working "tap to pay" button here would risk a parent's payment
-      // silently failing. "If their UPI app supports it" (also said in
-      // the in-app QR popup) is the honest version of this.
-      payLines.push("Or pay via UPI to this mobile number (if your UPI app supports paying by mobile number): +91 " + profile.upi_mobile.trim());
+      // plain number to copy, not a QR code or tap-to-pay link.
+      //
+      // CHANGED (per Neeraj): dropped the parenthetical caveat entirely
+      // — first reworded from "if your UPI app supports paying by mobile
+      // number" to "works only if it's linked to my UPI account" (the
+      // app-compatibility framing was checked and found inaccurate — see
+      // the git history for that research), then removed outright at
+      // Neeraj's call. The underlying fact hasn't changed: this can
+      // still fail to resolve if the tutor's own number was never linked
+      // to a UPI account with their bank. That risk is unchanged by
+      // removing the caveat text — only the on-screen wording is.
+      payLines.push("Or pay via UPI to this mobile number: +91 " + profile.upi_mobile.trim());
     }
     if (hasQrPhoto && !hasUpi) {
       // CHANGED (per Neeraj): this line (and the matching alert() below)
@@ -1701,9 +1706,12 @@ function PaymentQrModal(props) {
       // no longer tied to also having a UPI ID, since this is now a
       // standalone third payment option, not just an addition to the
       // first. Label adjusts depending on whether it's an alternative to
-      // something above it or the only option available.
+      // something above it or the only option available. No parenthetical
+      // caveat (per Neeraj — see the matching note in sendReminder()); the
+      // underlying limitation (this can fail if the number was never
+      // linked to a UPI account) still exists, just isn't spelled out here.
       upiMobile ? h('div', { style: { borderColor: colors.border }, className: 'border rounded-md px-3 py-2 mb-2' },
-        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, upiId ? 'Or pay to this mobile number (if their UPI app supports it)' : 'Pay via UPI to this mobile number (if their UPI app supports it)'),
+        h('p', { style: { color: colors.inkSoft }, className: 'text-[11px]' }, upiId ? 'Or pay to this mobile number' : 'Pay via UPI to this mobile number'),
         h('div', { className: 'flex items-center justify-between gap-2' },
           h('p', { style: { fontFamily: "'IBM Plex Mono', monospace" }, className: 'text-sm' }, '+91 ' + upiMobile),
           h('button', { onClick: () => copy('mobile', upiMobile), style: { color: colors.inkSoft }, className: 'text-xs hover:underline shrink-0' }, copied === 'mobile' ? 'Copied' : 'Copy')
