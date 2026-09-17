@@ -551,16 +551,21 @@ function App() {
       // the in-app QR popup) is the honest version of this.
       payLines.push("Or pay via UPI to this mobile number (if your UPI app supports paying by mobile number): +91 " + profile.upi_mobile.trim());
     }
-    if (hasQrPhoto) {
+    if (hasQrPhoto && !hasUpi) {
+      // CHANGED (per Neeraj): this line (and the matching alert() below)
+      // only appear when there's no UPI ID — with one set, the message
+      // already has a fully working pay link, so mentioning a QR photo
+      // on top of that is just noise, not a real second option worth
+      // asking the parent to notice.
+      //
       // The tutor has uploaded a photo of their own QR code. This app
       // cannot attach that photo to the WhatsApp message on its own —
       // WhatsApp's "open chat with prefilled text" link only ever fills
       // in text, never a file, for any app; that's a fixed WhatsApp
       // restriction, not something to be fixed here. So the message
-      // tells the parent to expect the photo separately, and — only when
-      // there's no UPI ID already giving a fully working link (see the
-      // alert() below) — a reminder tells the tutor to attach it by hand
-      // in the very same chat this wa.me link already opens.
+      // tells the parent to expect the photo separately, and the
+      // alert() below reminds the tutor to attach it by hand in the
+      // very same chat this wa.me link already opens.
       payLines.push("I'm also sending my payment QR code as a photo in this chat — scan it and enter Rs." + total + " to pay.");
     }
     let msg;
